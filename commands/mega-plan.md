@@ -530,17 +530,39 @@ After design_doc.json is generated, check new decisions against any existing pro
 
 ```bash
 uv run python "${CLAUDE_PLUGIN_ROOT}/skills/hybrid-ralph/scripts/memory-doctor.py" \
-  --mode passive \
+  --mode collect \
   --new-decisions design_doc.json \
   --project-root "$(pwd)"
 ```
 
 Exit code handling:
-- **Exit 0**: No issues found or no existing decisions to compare — proceed silently to Step 6
-- **Exit 1**: Decision conflicts or duplicates detected — follow the resolution steps below
-- **Exit 2** (or script crash/traceback): Infrastructure error (e.g., no LLM provider). Log the warning and proceed to Step 6. This check is advisory and must not block mega-plan generation.
+- **Exit 0**: Decisions collected successfully — parse the JSON output and proceed to analysis below
+- **Exit 2** (or script crash/traceback): Infrastructure error. Log the warning and proceed to Step 5.4. This check is advisory and must not block mega-plan generation.
 
-If exit code is 1:
+Parse the JSON output. It has this structure:
+```json
+{
+  "mode": "passive",
+  "total_decisions": <int>,
+  "source_count": <int>,
+  "existing_decisions": [...],
+  "new_decisions": [...],
+  "sources": {"<filepath>": [...]}
+}
+```
+
+If `existing_decisions` is empty or `new_decisions` is empty, proceed silently to Step 5.4.
+
+**Analyze for conflicts**: Compare each decision in `new_decisions` against `existing_decisions` to identify:
+- **CONFLICT**: Two decisions contradict each other on the same topic
+- **SUPERSEDED**: A new decision covers the scope of an existing one
+- **DUPLICATE**: A new decision says the same thing as an existing one in different words
+
+Only report genuine issues. Decisions about different topics or compatible decisions should NOT be reported.
+
+If no issues found, proceed silently to Step 5.4.
+
+If issues found:
 1. Display the diagnosis report to the user
 2. Use `AskUserQuestion` to ask the user how to resolve each issue:
    - **Deprecate** — Mark the older/conflicting decision as deprecated (recommended for conflicts and superseded)
@@ -548,7 +570,7 @@ If exit code is 1:
    - **Skip** — Keep both decisions as-is
 3. Apply the user's choices using the memory-doctor `--apply` command:
 
-   **CRITICAL**: Construct a JSON array of the user's choices and save it to `_doctor_actions.json`. Each entry must include the full diagnosis context with `decision_a` and `decision_b` dicts (including `id` and `_source` fields) as returned by the diagnosis report:
+   **CRITICAL**: Construct a JSON array of the user's choices and save it to `_doctor_actions.json`. Each entry must include the full diagnosis context with `decision_a` and `decision_b` dicts (including `id` and `_source` fields):
 
    ```json
    [

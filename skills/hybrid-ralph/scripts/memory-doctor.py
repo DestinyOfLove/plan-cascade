@@ -8,6 +8,11 @@ across all design documents in a Plan Cascade project.
 Usage:
   python memory-doctor.py --mode full [--project-root DIR]
   python memory-doctor.py --mode passive --new-decisions FILE [--project-root DIR]
+  python memory-doctor.py --mode collect [--project-root DIR]
+  python memory-doctor.py --mode collect --new-decisions FILE [--project-root DIR]
+
+Collect mode outputs structured JSON to stdout without requiring an LLM provider.
+When --new-decisions is provided, decisions are split into existing vs new.
 """
 
 import argparse
@@ -101,10 +106,17 @@ def print_no_llm_warning():
     print(f"{BOX_TL}{BOX_H * w}{BOX_TR}")
     print(f"{BOX_V}  MEMORY DOCTOR — No LLM Available{' ' * (w - 34)}{BOX_V}")
     print(f"{BOX_ML}{BOX_H * w}{BOX_MR}")
-    msg = "  Cannot perform semantic analysis without an LLM provider."
+    msg = "  Semantic analysis requires an LLM provider."
     print(f"{BOX_V}{msg:<{w}}{BOX_V}")
-    msg2 = "  Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY."
+    msg2 = "  Falling back to collect mode (structured JSON output)."
     print(f"{BOX_V}{msg2:<{w}}{BOX_V}")
+    print(f"{BOX_V}{' ' * w}{BOX_V}")
+    msg3 = "  Alternatives:"
+    print(f"{BOX_V}{msg3:<{w}}{BOX_V}")
+    msg4 = "    - Use /plan-cascade:memory-doctor (no API key needed)"
+    print(f"{BOX_V}{msg4:<{w}}{BOX_V}")
+    msg5 = "    - Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY"
+    print(f"{BOX_V}{msg5:<{w}}{BOX_V}")
     print(f"{BOX_BL}{BOX_H * w}{BOX_BR}")
 
 
@@ -115,7 +127,9 @@ def run_full_diagnosis(project_root: Path):
     llm = create_llm_provider()
     if not llm:
         print_no_llm_warning()
-        sys.exit(2)
+        # Fall back to collect mode output
+        run_collect(project_root)
+        return
 
     from plan_cascade.core.memory_doctor import MemoryDoctor
 
@@ -167,7 +181,9 @@ def run_passive_diagnosis(project_root: Path, new_decisions_path: Path):
     llm = create_llm_provider()
     if not llm:
         print_no_llm_warning()
-        sys.exit(2)
+        # Fall back to collect mode output
+        run_collect(project_root, new_decisions_path)
+        return
 
     from plan_cascade.core.memory_doctor import MemoryDoctor
 
@@ -250,16 +266,80 @@ def run_apply(project_root: Path, apply_path: Path):
     print(f"Applied {applied} action(s).")
 
 
+def run_collect(project_root: Path, new_decisions_path: Path | None = None):
+    """Collect all decisions and output structured JSON. No LLM required."""
+    setup_path()
+    from plan_cascade.core.memory_doctor import MemoryDoctor
+
+    doctor = MemoryDoctor(project_root)  # No llm_provider needed
+    all_decisions = doctor.collect_all_decisions()
+
+    if new_decisions_path:
+        # Passive: separate new from existing
+        new_doc = load_json_file(new_decisions_path)
+        if not new_doc:
+            print(f"Error: Cannot load {new_decisions_path}", file=sys.stderr)
+            sys.exit(2)
+
+        new_decisions = new_doc.get("decisions", [])
+        new_source = str(new_decisions_path.resolve())
+
+        # Tag new decisions with source
+        for d in new_decisions:
+            d["_source"] = new_source
+
+        # Exclude new doc's decisions from existing
+        existing = [d for d in all_decisions if d.get("_source") != new_source]
+
+        mode = "passive"
+    else:
+        # Full: all decisions are "existing"
+        existing = all_decisions
+        new_decisions = []
+        mode = "full"
+
+    # Group by source
+    sources: dict[str, list[dict]] = {}
+    for d in existing + new_decisions:
+        src = d.get("_source", "unknown")
+        sources.setdefault(src, []).append(d)
+
+    output = {
+        "mode": mode,
+        "total_decisions": len(existing) + len(new_decisions),
+        "source_count": len(sources),
+        "existing_decisions": existing,
+        "new_decisions": new_decisions,
+        "sources": sources,
+    }
+
+    json.dump(output, sys.stdout, indent=2, ensure_ascii=False)
+    print()  # trailing newline
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Memory Doctor — Decision Conflict Detection",
+        epilog=(
+            "Modes:\n"
+            "  full     Full pairwise scan of all decisions (requires LLM provider)\n"
+            "  passive  Compare new decisions against existing (requires LLM provider)\n"
+            "  collect  Output all decisions as structured JSON (no LLM required)\n"
+            "\n"
+            "When full/passive mode is used without an LLM provider, the script\n"
+            "falls back to collect mode output and exits 0."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--mode",
-        choices=["passive", "full"],
+        choices=["passive", "full", "collect"],
         default="full",
-        help="Diagnosis mode: 'full' scans all decisions, 'passive' compares new vs existing",
+        help=(
+            "Diagnosis mode: 'full' scans all decisions, "
+            "'passive' compares new vs existing, "
+            "'collect' outputs all decisions as JSON (no LLM required)"
+        ),
     )
     parser.add_argument(
         "--new-decisions",
@@ -283,6 +363,8 @@ def main():
     try:
         if args.apply:
             run_apply(args.project_root, args.apply)
+        elif args.mode == "collect":
+            run_collect(args.project_root, args.new_decisions)
         elif args.mode == "passive":
             if not args.new_decisions:
                 parser.error("--new-decisions is required for passive mode")

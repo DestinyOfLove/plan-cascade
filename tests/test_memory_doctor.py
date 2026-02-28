@@ -539,3 +539,272 @@ class TestDiagnosisToDict:
         assert result["decision_a_id"] == "ADR-001"
         assert result["decision_b_id"] == "ADR-002"
         assert result["explanation"] == "Conflict between A and B"
+
+
+# =============================================================================
+# Tests for collect_new_vs_existing
+# =============================================================================
+
+
+class TestCollectNewVsExisting:
+    """Tests for separating new decisions from existing."""
+
+    def test_separates_new_and_existing(self, temp_project_dir):
+        """New decisions are separated from existing."""
+        # Existing decisions in root
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "REST", "Use REST")],
+            level="project",
+        )
+        # New decisions in a separate file
+        new_path = temp_project_dir / "new_design_doc.json"
+        write_design_doc(
+            new_path,
+            [make_decision("ADR-F001", "JWT", "Use JWT")],
+        )
+
+        doctor = MemoryDoctor(temp_project_dir)
+        result = doctor.collect_new_vs_existing(new_path)
+
+        assert len(result["existing_decisions"]) == 1
+        assert result["existing_decisions"][0]["id"] == "ADR-001"
+        assert len(result["new_decisions"]) == 1
+        assert result["new_decisions"][0]["id"] == "ADR-F001"
+        assert result["total_decisions"] == 2
+        assert result["source_count"] == 2
+
+    def test_excludes_new_source_from_existing(self, temp_project_dir):
+        """Decisions from new_decisions_path are not in existing_decisions."""
+        # Put decisions in a path that collect_all_decisions() would also find
+        feature_path = temp_project_dir / "feature-auth" / "design_doc.json"
+        write_design_doc(
+            feature_path,
+            [make_decision("ADR-F001", "Auth", "Use OAuth")],
+        )
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "REST", "Use REST")],
+            level="project",
+        )
+
+        doctor = MemoryDoctor(temp_project_dir)
+        result = doctor.collect_new_vs_existing(feature_path)
+
+        # Feature decisions should be in new, not existing
+        existing_ids = [d["id"] for d in result["existing_decisions"]]
+        new_ids = [d["id"] for d in result["new_decisions"]]
+        assert "ADR-F001" in new_ids
+        assert "ADR-F001" not in existing_ids
+        assert "ADR-001" in existing_ids
+
+    def test_empty_project(self, temp_project_dir):
+        """Returns empty lists when no design docs exist."""
+        new_path = temp_project_dir / "new_doc.json"
+        write_design_doc(new_path, [make_decision("ADR-F001", "New", "New")])
+
+        doctor = MemoryDoctor(temp_project_dir)
+        result = doctor.collect_new_vs_existing(new_path)
+
+        assert result["existing_decisions"] == []
+        assert len(result["new_decisions"]) == 1
+
+    def test_missing_new_decisions_file(self, temp_project_dir):
+        """Handles missing file gracefully by returning empty new_decisions."""
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "A", "A")],
+            level="project",
+        )
+        missing = temp_project_dir / "nonexistent.json"
+
+        doctor = MemoryDoctor(temp_project_dir)
+        result = doctor.collect_new_vs_existing(missing)
+
+        assert result["new_decisions"] == []
+        assert len(result["existing_decisions"]) >= 1
+
+    def test_no_llm_required(self, temp_project_dir):
+        """Works without any LLM provider."""
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "A", "A")],
+            level="project",
+        )
+        new_path = temp_project_dir / "new.json"
+        write_design_doc(new_path, [make_decision("ADR-F001", "B", "B")])
+
+        # Explicitly no LLM
+        doctor = MemoryDoctor(temp_project_dir, llm_provider=None)
+        result = doctor.collect_new_vs_existing(new_path)
+
+        assert result["total_decisions"] == 2
+
+
+# =============================================================================
+# Tests for format_decisions_for_comparison
+# =============================================================================
+
+
+class TestFormatDecisionsForComparison:
+    """Tests for formatting decisions for external comparison."""
+
+    def test_strips_internal_fields(self):
+        """Removes all fields starting with _."""
+        decisions = [
+            {"id": "ADR-001", "title": "Test", "_source": "/path/a.json", "_role": "existing", "_source_label": "test"},
+        ]
+        result = MemoryDoctor.format_decisions_for_comparison(decisions)
+        assert len(result) == 1
+        assert "_role" not in result[0]
+        assert "_source_label" not in result[0]
+        assert "_source" not in result[0]
+
+    def test_preserves_visible_fields(self):
+        """Keeps all non-internal fields."""
+        decisions = [
+            {
+                "id": "ADR-001",
+                "title": "Test",
+                "context": "ctx",
+                "decision": "dec",
+                "rationale": "rat",
+                "alternatives_considered": ["alt1"],
+                "status": "accepted",
+                "_source": "/path/a.json",
+            },
+        ]
+        result = MemoryDoctor.format_decisions_for_comparison(decisions)
+        assert result[0]["id"] == "ADR-001"
+        assert result[0]["title"] == "Test"
+        assert result[0]["context"] == "ctx"
+        assert result[0]["rationale"] == "rat"
+        assert result[0]["status"] == "accepted"
+
+    def test_converts_source_to_source_file(self):
+        """Converts _source to source_file."""
+        decisions = [{"id": "ADR-001", "_source": "/path/to/design_doc.json"}]
+        result = MemoryDoctor.format_decisions_for_comparison(decisions)
+        assert result[0]["source_file"] == "/path/to/design_doc.json"
+
+    def test_empty_list(self):
+        """Returns empty list for empty input."""
+        result = MemoryDoctor.format_decisions_for_comparison([])
+        assert result == []
+
+
+# =============================================================================
+# Tests for CLI --mode collect
+# =============================================================================
+
+
+class TestCollectModeCLI:
+    """Tests for CLI collect mode integration."""
+
+    def test_collect_mode_full(self, temp_project_dir):
+        """Collect mode outputs valid JSON for full collection."""
+        import subprocess
+
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "Test", "Test decision")],
+            level="project",
+        )
+
+        script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
+        result = subprocess.run(
+            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+
+        assert result.returncode == 0
+        output = json.loads(result.stdout)
+        assert output["mode"] == "full"
+        assert output["total_decisions"] == 1
+        assert len(output["existing_decisions"]) == 1
+        assert output["new_decisions"] == []
+
+    def test_collect_mode_passive(self, temp_project_dir):
+        """Collect mode with --new-decisions separates lists."""
+        import subprocess
+
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "Existing", "Existing")],
+            level="project",
+        )
+        new_path = temp_project_dir / "feature" / "design_doc.json"
+        write_design_doc(new_path, [make_decision("ADR-F001", "New", "New")])
+
+        script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
+        result = subprocess.run(
+            [
+                "uv", "run", "python", str(script),
+                "--mode", "collect",
+                "--new-decisions", str(new_path),
+                "--project-root", str(temp_project_dir),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+
+        assert result.returncode == 0
+        output = json.loads(result.stdout)
+        assert output["mode"] == "passive"
+        assert len(output["new_decisions"]) == 1
+        assert output["new_decisions"][0]["id"] == "ADR-F001"
+
+    def test_collect_mode_empty_project(self, temp_project_dir):
+        """Collect mode outputs valid JSON with empty lists for empty project."""
+        import subprocess
+
+        script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
+        result = subprocess.run(
+            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+
+        assert result.returncode == 0
+        output = json.loads(result.stdout)
+        assert output["total_decisions"] == 0
+        assert output["existing_decisions"] == []
+
+    def test_collect_mode_exit_codes(self, temp_project_dir):
+        """Collect mode exits 0 on success, 2 on error."""
+        import subprocess
+
+        # Success case (empty project is still success)
+        script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
+        result = subprocess.run(
+            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        assert result.returncode == 0
+
+    def test_collect_mode_includes_source(self, temp_project_dir):
+        """Collect mode includes _source annotation on each decision."""
+        import subprocess
+
+        write_design_doc(
+            temp_project_dir / "design_doc.json",
+            [make_decision("ADR-001", "Test", "Test")],
+            level="project",
+        )
+
+        script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
+        result = subprocess.run(
+            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).parent.parent),
+        )
+
+        output = json.loads(result.stdout)
+        assert "_source" in output["existing_decisions"][0]

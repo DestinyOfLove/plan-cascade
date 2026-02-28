@@ -178,9 +178,74 @@ class MemoryDoctor:
 
         return await self._run_batched_diagnosis(all_decisions)
 
+    def collect_new_vs_existing(self, new_decisions_path: Path) -> dict:
+        """
+        Collect decisions separated into new and existing groups.
+
+        This method is LLM-free — it only performs file I/O and list operations.
+        Used by --mode collect to provide structured data for external analysis.
+
+        Args:
+            new_decisions_path: Path to design_doc.json with new decisions
+
+        Returns:
+            Dict with keys: existing_decisions, new_decisions, sources,
+            total_decisions, source_count
+        """
+        all_decisions = self.collect_all_decisions()
+        new_source = str(new_decisions_path.resolve())
+
+        # Load new decisions from the specified file
+        new_decisions = self._load_decisions_from(new_decisions_path)
+
+        # Exclude new doc's decisions from existing list
+        existing = [d for d in all_decisions if d.get("_source") != new_source]
+
+        # Group by source
+        sources: dict[str, list[dict]] = {}
+        for d in existing + new_decisions:
+            src = d.get("_source", "unknown")
+            sources.setdefault(src, []).append(d)
+
+        return {
+            "existing_decisions": existing,
+            "new_decisions": new_decisions,
+            "sources": sources,
+            "total_decisions": len(existing) + len(new_decisions),
+            "source_count": len(sources),
+        }
+
+    @staticmethod
+    def format_decisions_for_comparison(decisions: list[dict]) -> list[dict]:
+        """
+        Format decisions for external comparison by stripping internal fields.
+
+        This method is LLM-free. It produces clean JSON-serializable dicts
+        suitable for an external reviewer (e.g., Claude Code) to analyze.
+
+        Internal fields starting with '_' are removed, except _source which
+        is converted to 'source_file' for context.
+
+        Args:
+            decisions: List of decision dicts with potential internal fields
+
+        Returns:
+            List of cleaned decision dicts
+        """
+        clean = []
+        for d in decisions:
+            entry = {k: v for k, v in d.items() if not k.startswith("_")}
+            if "_source" in d:
+                entry["source_file"] = d["_source"]
+            clean.append(entry)
+        return clean
+
     def collect_all_decisions(self) -> list[dict]:
         """
         Collect all decisions from project root and worktree design documents.
+
+        This method is LLM-free — it only performs file I/O and JSON parsing.
+        No LLM provider is required.
 
         Returns:
             List of decision dicts, each annotated with '_source' field
