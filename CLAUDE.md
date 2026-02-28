@@ -66,7 +66,7 @@ Story Execution (task-level) → Code changes
 
 **Parallel Execution** (`core/parallel_executor.py`, `core/orchestrator.py`): Executes stories in dependency-resolved batches.
 
-**Quality Gates** (`core/quality_gate.py`): TypeCheck, Test, Lint validation after each story.
+**Quality Gates** (`core/quality_gate.py`, `core/verification_gate.py`, `core/code_review_gate.py`): Three-phase validation after each story — static gates (TypeCheck, Test, Lint) and AI gates (Verification, Code Review, TDD Compliance) running in parallel.
 
 **Agent Selection** (`backends/agent_executor.py`): Matches agents to story types with fallback chains.
 

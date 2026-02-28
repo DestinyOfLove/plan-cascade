@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Quality gate parallelization** - Verify, review, and TDD gates now run in parallel instead of sequentially, reducing quality gate wall-clock time
+- **Per-gate output files** - Gate results written to `.agent-outputs/{story_id}.{gate}.result` instead of shared `progress.txt`, eliminating file contention
+- **CI workflow** - Added CI pipeline with pytest, ruff, mypy, and `approve.md` sync check
+
+### Fixed
+
+- **Restored gate semantics** - `REQUIRE_REVIEW` and `ENFORCE_TEST_CHANGES` behaviors restored in hard gate handler
+- **Agent routing** - `VERIFY_AGENT` and `REVIEW_AGENT` now properly wired into Task/CLI dispatch
+- **Shell injection fix** - Sanitized inputs in CLI verification path
+- **Per-story diff scoping** - `git diff` now filtered by `design_doc` story_mappings for accurate per-story change detection
+- **DoD gate strictness** - Enforced full Definition of Done checks at FULL strictness level
+
 ## [4.3.6] - 2026-02-02
 
 ### Added

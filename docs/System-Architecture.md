@@ -1164,26 +1164,17 @@ flowchart TD
     R -->|Yes| U[Execute Quality Gates]
 
     U --> FMT2{FORMAT<br/>PRE_VALIDATION}
-    FMT2 -->|✓| V{TypeCheck}
+    FMT2 -->|✓| QGV2[TYPECHECK + TEST + LINT<br/>VALIDATION - Parallel]
     FMT2 -->|✗| X[Record Failure Details]
 
-    V -->|✓| W{Tests}
-    V -->|✗| X
+    QGV2 -->|✓| VERIFY{AI Gates Enabled?}
+    QGV2 -->|✗| X
 
-    W -->|✓| Y{Lint}
-    W -->|✗| X
+    VERIFY -->|Yes| PQG[Parallel Quality Gates<br/>Verify + Review + TDD]
+    VERIFY -->|No| T
 
-    Y -->|✓| VERIFY{AI Verify?}
-    Y -->|✗ and required| X
-    Y -->|✗ but optional| VERIFY
-
-    VERIFY -->|Yes| VGATE[AI Verification Gate]
-    VERIFY -->|No| CR2
-    VGATE -->|Pass| CR2{CODE_REVIEW<br/>POST_VALIDATION}
-    VGATE -->|Fail| X
-
-    CR2 -->|✓ or disabled| T
-    CR2 -->|✗ critical| X
+    PQG -->|✓ All Pass| T
+    PQG -->|✗ critical| X
 
     X --> Z{Can Retry?}
     S --> Z

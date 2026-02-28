@@ -1164,26 +1164,17 @@ flowchart TD
     R -->|是| U[执行质量门控]
 
     U --> FMT2{FORMAT<br/>PRE_VALIDATION}
-    FMT2 -->|✓| V{TypeCheck}
+    FMT2 -->|✓| QGV2[TYPECHECK + TEST + LINT<br/>VALIDATION - 并行]
     FMT2 -->|✗| X[记录失败详情]
 
-    V -->|✓| W{Tests}
-    V -->|✗| X
+    QGV2 -->|✓| VERIFY{AI 门控启用?}
+    QGV2 -->|✗| X
 
-    W -->|✓| Y{Lint}
-    W -->|✗| X
+    VERIFY -->|是| PQG[并行质量门控<br/>验证 + 审查 + TDD]
+    VERIFY -->|否| T
 
-    Y -->|✓| VERIFY{AI 验证?}
-    Y -->|✗ 且必需| X
-    Y -->|✗ 但可选| VERIFY
-
-    VERIFY -->|是| VGATE[AI 验证门]
-    VERIFY -->|否| CR2
-    VGATE -->|通过| CR2{CODE_REVIEW<br/>POST_VALIDATION}
-    VGATE -->|失败| X
-
-    CR2 -->|✓ 或禁用| T
-    CR2 -->|✗ 严重| X
+    PQG -->|✓ 全部通过| T
+    PQG -->|✗ 严重| X
 
     X --> Z{可重试?}
     S --> Z

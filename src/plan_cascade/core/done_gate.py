@@ -21,6 +21,13 @@ class DoDLevel(Enum):
     FULL = "full"         # Full completion checks (stricter)
 
 
+# Markers that indicate a genuine pass
+PASS_MARKERS = frozenset({"[VERIFIED]", "[REVIEW_PASSED]", "[TDD_PASSED]"})
+
+# Markers that represent warnings/skips — acceptable at STANDARD, rejected at FULL
+WARNING_MARKERS = frozenset({"[VERIFY_SKIPPED]", "[REVIEW_ACKNOWLEDGED]", "[TDD_WARNING]"})
+
+
 @dataclass
 class DoDCheckResult:
     """
@@ -130,16 +137,29 @@ class DoDCheckResult:
 # Standard Flow DoD Checks
 # =============================================================================
 
+def _is_warning_marker(marker: str | None) -> bool:
+    """Check if a marker string contains a warning-level marker."""
+    if not marker:
+        return False
+    return any(wm in marker for wm in WARNING_MARKERS)
+
+
 def check_quality_gates_passed(
     gate_outputs: dict[str, Any],
     required_gates: list[str] | None = None,
+    level: DoDLevel = DoDLevel.STANDARD,
 ) -> DoDCheckResult:
     """
     Check that all required quality gates passed.
 
     Args:
-        gate_outputs: Dictionary of gate name -> GateOutput (or dict with 'passed' key)
+        gate_outputs: Dictionary of gate name -> GateOutput (or dict with 'passed' key).
+            Each gate output may include an optional 'marker' field (str) indicating
+            which progress marker was used (e.g. '[VERIFIED]', '[VERIFY_SKIPPED]').
         required_gates: List of gate names that must pass (all if None)
+        level: DoD enforcement level. At FULL, warning markers
+            ([VERIFY_SKIPPED], [REVIEW_ACKNOWLEDGED], [TDD_WARNING]) are treated
+            as failures even when 'passed' is True. At STANDARD they remain passes.
 
     Returns:
         DoDCheckResult with findings
@@ -156,6 +176,7 @@ def check_quality_gates_passed(
 
     passed_gates = []
     failed_gates = []
+    warning_gates = []
 
     for gate_name in gates_to_check:
         output = gate_outputs.get(gate_name)
@@ -166,7 +187,20 @@ def check_quality_gates_passed(
         # Handle both GateOutput objects and dicts
         gate_passed = output.get("passed") if isinstance(output, dict) else getattr(output, "passed", False)
 
-        if gate_passed:
+        # Check for warning markers at FULL level
+        marker = (
+            output.get("marker") if isinstance(output, dict) else getattr(output, "marker", None)
+        )
+
+        if gate_passed and level == DoDLevel.FULL and _is_warning_marker(marker):
+            # At FULL level, warning markers are not genuine passes
+            warning_gates.append(gate_name)
+            failed_gates.append(gate_name)
+            result.add_error(
+                f"Gate '{gate_name}' used warning marker ({marker}) "
+                f"which is not accepted at FULL level"
+            )
+        elif gate_passed:
             passed_gates.append(gate_name)
         else:
             failed_gates.append(gate_name)
@@ -183,6 +217,8 @@ def check_quality_gates_passed(
 
     result.details["passed_gates"] = passed_gates
     result.details["failed_gates"] = failed_gates
+    if warning_gates:
+        result.details["warning_gates"] = warning_gates
 
     if not failed_gates:
         result.details["message"] = f"All {len(passed_gates)} quality gate(s) passed"
@@ -852,7 +888,7 @@ class DoneGate:
             Combined DoDCheckResult
         """
         results = [
-            check_quality_gates_passed(gate_outputs or {}, required_gates),
+            check_quality_gates_passed(gate_outputs or {}, required_gates, level=DoDLevel.STANDARD),
             check_ai_verification(verification_result, confidence_threshold),
             check_skeleton_code_detection(verification_result),
             check_change_summary(changed_files, interfaces_changed, summary_text),
@@ -896,9 +932,9 @@ class DoneGate:
         Returns:
             Combined DoDCheckResult
         """
-        # Start with standard checks
+        # Start with standard checks (but with FULL level for strict gate validation)
         results = [
-            check_quality_gates_passed(gate_outputs or {}, required_gates),
+            check_quality_gates_passed(gate_outputs or {}, required_gates, level=DoDLevel.FULL),
             check_ai_verification(verification_result, confidence_threshold),
             check_skeleton_code_detection(verification_result),
             check_change_summary(changed_files, interfaces_changed, summary_text),

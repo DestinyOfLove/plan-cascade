@@ -1208,8 +1208,8 @@ If run_review: enabled_gates.append("review")
 If run_tdd: enabled_gates.append("tdd")
 
 If len(enabled_gates) == 0:
-    echo "All quality gates disabled. Skipping to Step 9.3."
-    Continue to Step 9.3
+    echo "All quality gates disabled. Skipping to DoD gate."
+    Continue to Step 9.2.7 (DoD Gate)
 
 echo "Launching {len(enabled_gates)} quality gate(s) in parallel: {', '.join(enabled_gates)}"
 ```
@@ -1399,10 +1399,19 @@ For each completed_story in batch:
         review_tasks.append((story_id, review_task))
 
     # ── Gate 3: TDD Compliance (lightweight, inline — no subagent needed) ──
-    # TDD runs synchronously here — no task_id needed for wait step.
+    # TDD runs synchronously here because it's just a file-list comparison.
+    # No task_id needed — results stored in tdd_results dict immediately.
+    # Relationship: run_tdd controls whether TDD runs at all;
+    #   ENFORCE_TEST_CHANGES controls whether TDD failure blocks (hard gate).
     If run_tdd:
-        code_files = filter changed_files for code extensions, excluding test patterns
-        test_files = filter changed_files for test patterns
+        # Scope changed_files per story (same as diff scoping above)
+        If story_files is not empty:
+            story_changed = [f for f in changed_files if any(f.startswith(sf) or sf.startswith(f) for sf in story_files)]
+        Else:
+            story_changed = changed_files  # No mapping → use full list
+
+        code_files = filter story_changed for code extensions, excluding test patterns
+        test_files = filter story_changed for test patterns
 
         If code_files exist AND test_files empty:
             tdd_results[story_id] = "failed"
@@ -1427,16 +1436,46 @@ Task(prompt=REVIEW_PROMPT, subagent_type="general-purpose", run_in_background=tr
 **9.2.6.3: Wait for All Gates**
 
 ```
-# Wait for all background gate agents to complete
-# Build unified task list from the tracking lists populated in 9.2.6.2
-all_task_ids = []
-For story_id, task_id in verification_tasks:
-    all_task_ids.append(task_id)
-For story_id, task_id in review_tasks:
-    all_task_ids.append(task_id)
+# Wait for all background gate agents to complete.
+# NOTE: TDD compliance runs inline in 9.2.6.2 (lightweight file-list comparison),
+# so it has no task_id and is not included in the wait step.
 
-For each task_id in all_task_ids:
-    TaskOutput(task_id=task_id, block=true, timeout=180000)
+# Per-gate-type timeouts (verify is focused/faster, review is broader)
+VERIFY_TIMEOUT = 120000   # 2 minutes per verification
+REVIEW_TIMEOUT = 180000   # 3 minutes per review
+
+# Global batch gate timeout — caps total wait regardless of individual timeouts
+BATCH_GATE_TIMEOUT = 600000  # 10 minutes for all gates combined
+batch_start_time = now()
+
+# Build unified task list with per-gate timeouts
+all_tasks = []
+For story_id, task_id in verification_tasks:
+    all_tasks.append((story_id, task_id, "verify", VERIFY_TIMEOUT))
+For story_id, task_id in review_tasks:
+    all_tasks.append((story_id, task_id, "review", REVIEW_TIMEOUT))
+
+# Wait for each task, using remaining global time as upper bound
+gate_errors = {}  # story_id → error message (for tasks that timed out or crashed)
+For story_id, task_id, gate_type, gate_timeout in all_tasks:
+    elapsed = now() - batch_start_time
+    remaining = BATCH_GATE_TIMEOUT - elapsed
+    If remaining <= 0:
+        gate_errors[story_id] = f"{gate_type} gate skipped — batch timeout exceeded"
+        Continue
+
+    effective_timeout = min(gate_timeout, remaining)
+    try:
+        TaskOutput(task_id=task_id, block=true, timeout=effective_timeout)
+    except timeout_or_error as e:
+        gate_errors[story_id] = f"{gate_type} gate failed: {str(e)}"
+
+If gate_errors:
+    echo "⚠️ Gate execution errors:"
+    For story_id, error in gate_errors:
+        echo "  - {story_id}: {error}"
+        # Write failure marker for timed-out/crashed gates
+        echo "[{gate_type.upper()}_FAILED] {story_id} - {error}" > .agent-outputs/{story_id}.{gate_type}.result
 
 echo "All quality gates completed."
 ```
@@ -1445,6 +1484,10 @@ echo "All quality gates completed."
 
 After all gates complete, read per-gate output files and merge results into `progress.txt` atomically.
 This avoids the concurrent-write race condition that would occur if subagents appended to progress.txt directly.
+
+**Idempotency**: Subagent prompts instruct writing to `.result` files (not appending).
+On retry, the new `.result` file overwrites the previous one, ensuring exactly one marker per story per gate.
+The merge step below reads the latest result — no deduplication needed.
 
 ```
 # ── Collect verification results from per-gate files ──
@@ -1518,7 +1561,7 @@ If any gate reported failures, handle them based on GATE_MODE and per-gate confi
 ```
 If any_failures == false:
     echo "✓ All quality gates passed."
-    Continue to Step 9.2.9 (DoD Gate)
+    Continue to Step 9.2.7 (DoD Gate)
 
 # ── Failures detected ──
 echo ""
@@ -1698,14 +1741,27 @@ If using external LLM CLI for verification (configured in agents.json):
 }
 ```
 
+**SECURITY WARNING**: Never interpolate prompt content directly into shell commands.
+Story descriptions may contain shell metacharacters (`'`, `` ` ``, `$()`) that enable injection.
+
 ```
-# Execute CLI verification
+# SAFE: Write prompt to temp file, pass via file reference
+prompt_file = ".agent-outputs/{story_id}.verify.prompt"
+Write(prompt_file, VERIFY_PROMPT)
+
+# Sanitize story_id for path safety (alphanumeric, hyphens, underscores only)
+safe_story_id = sanitize(story_id, allow="[a-zA-Z0-9_-]")
+
+# Execute CLI verification via file input (no shell interpolation)
 Bash(
-    command="claude -p '{VERIFY_PROMPT}' >> .agent-outputs/{story_id}.verify.md",
+    command="claude -p \"$(cat .agent-outputs/{safe_story_id}.verify.prompt)\" > .agent-outputs/{safe_story_id}.verify.md",
     timeout=120000
 )
 
-# Parse output and update progress.txt accordingly
+# Clean up prompt file
+rm -f ".agent-outputs/{safe_story_id}.verify.prompt"
+
+# Parse output and write result to per-gate file
 ```
 
 **Notes**:
@@ -1714,7 +1770,7 @@ Bash(
 - TDD compliance: Controlled by `--tdd off|on|auto`
 - **Performance**: Parallel gate execution reduces total gate time from `verify_time + review_time + tdd_time` to `max(verify_time, review_time, tdd_time)`
 
-### 9.2.9: Definition of Done (DoD) Gate
+### 9.2.7: Definition of Done (DoD) Gate
 
 After all verification gates complete for a story, run DoD validation:
 
@@ -1762,10 +1818,26 @@ progress_path = Path("progress.txt")
 gate_outputs = {}
 if progress_path.exists():
     content = progress_path.read_text(encoding="utf-8", errors="ignore")
+    # Build gate_outputs with marker field for FULL-level strict validation.
+    # At FULL level, warning markers (SKIPPED/ACKNOWLEDGED/WARNING) are rejected.
+    def _find_marker(content, story_id, pass_marker, warn_marker, fail_marker):
+        """Return (passed, marker_string) for a gate."""
+        if f"{pass_marker} {story_id}" in content:
+            return True, pass_marker
+        elif f"{warn_marker} {story_id}" in content:
+            return True, warn_marker  # passed=True but marker is a warning
+        elif f"{fail_marker} {story_id}" in content:
+            return False, fail_marker
+        return False, None
+
+    v_passed, v_marker = _find_marker(content, story_id, "[VERIFIED]", "[VERIFY_SKIPPED]", "[VERIFY_FAILED]")
+    r_passed, r_marker = _find_marker(content, story_id, "[REVIEW_PASSED]", "[REVIEW_ACKNOWLEDGED]", "[REVIEW_ISSUES]")
+    t_passed, t_marker = _find_marker(content, story_id, "[TDD_PASSED]", "[TDD_WARNING]", "[TDD_FAILED]")
+
     gate_outputs = {
-        "verified": {"passed": f"[VERIFIED] {story_id}" in content or f"[VERIFY_SKIPPED] {story_id}" in content},
-        "review_passed": {"passed": f"[REVIEW_PASSED] {story_id}" in content or f"[REVIEW_ACKNOWLEDGED] {story_id}" in content},
-        "tdd_passed": {"passed": f"[TDD_PASSED] {story_id}" in content or f"[TDD_WARNING] {story_id}" in content},
+        "verified": {"passed": v_passed, "marker": v_marker},
+        "review_passed": {"passed": r_passed, "marker": r_marker},
+        "tdd_passed": {"passed": t_passed, "marker": t_marker},
     }
 
 # Best-effort changed-files detection (for FULL DoD test-enforcement checks)
