@@ -104,30 +104,58 @@ For each finding, show:
     建议: <suggestion>
 ```
 
-## Step 4: Interactive Resolution
+## Step 4: Batched Interactive Resolution
 
-**CRITICAL**: For each diagnosis finding, use `AskUserQuestion` to let the user choose an action:
+**CRITICAL**: Group all diagnosis findings into batches of up to 4 and use one `AskUserQuestion` per batch. This avoids asking the user N separate questions.
 
-**For CONFLICT findings:**
-- **Deprecate** — Mark the older decision as `deprecated` (recommended)
-- **Skip** — Keep both decisions as-is
+**Option mapping by issue type:**
+- **CONFLICT** findings: options = `["Deprecate (recommended)", "Skip"]`
+- **SUPERSEDED** findings: options = `["Deprecate (recommended)", "Skip"]`
+- **DUPLICATE** findings: options = `["Merge (recommended)", "Skip"]`
 
-**For SUPERSEDED findings:**
-- **Deprecate** — Mark the superseded decision as `deprecated` (recommended)
-- **Skip** — Keep both decisions as-is
+```
+# Group findings into batches of up to 4
+BATCH_SIZE = 4
+batches = [findings[i:i+BATCH_SIZE] for i in range(0, len(findings), BATCH_SIZE)]
 
-**For DUPLICATE findings:**
-- **Merge** — Keep one decision, remove the duplicate (recommended)
-- **Skip** — Keep both decisions as-is
+all_responses = []
+For batch_num, batch in enumerate(batches):
+    questions = []
+    For idx, finding in enumerate(batch):
+        global_idx = batch_num * BATCH_SIZE + idx + 1
 
-Present each finding with its explanation and suggestion. Example question:
+        # Build options based on finding type
+        If finding.type in ["conflict", "superseded"]:
+            options = ["Deprecate (recommended)", "Skip"]
+        Elif finding.type == "duplicate":
+            options = ["Merge (recommended)", "Skip"]
+        Else:
+            options = ["Deprecate", "Merge", "Skip"]
 
-> **ADR-F003 vs ADR-F012**: Two decisions conflict on API response format.
-> Old: "API uses custom JSON structure" (feature-auth/design_doc.json)
-> New: "API uses JSON:API spec" (feature-order/design_doc.json)
-> Suggestion: Deprecate ADR-F003
->
-> How would you like to resolve this?
+        questions.append({
+            "header": f"Issue #{global_idx}",
+            "question": (
+                f"[{finding.type.upper()}] {finding.decision_a.id} vs {finding.decision_b.id}\n"
+                f"  旧: \"{finding.decision_a.title}\" ({finding.source_a})\n"
+                f"  新: \"{finding.decision_b.title}\" ({finding.source_b})\n"
+                f"  说明: {finding.explanation}\n"
+                f"  建议: {finding.suggestion}"
+            ),
+            "options": options
+        })
+
+    AskUserQuestion(questions=questions)
+    # Collect responses for this batch
+    all_responses.extend(batch responses)
+
+    If more batches remain:
+        echo "--- Batch {batch_num+1}/{len(batches)} complete. Continuing... ---"
+```
+
+After all batches are answered, map responses to actions for Step 5:
+- **"Deprecate (recommended)"** or **"Deprecate"** → action = `"deprecate"`
+- **"Merge (recommended)"** or **"Merge"** → action = `"merge"`
+- **"Skip"** → omit from the actions array entirely
 
 ## Step 5: Apply Changes
 

@@ -564,10 +564,46 @@ If no issues found, proceed silently to Step 5.4.
 
 If issues found:
 1. Display the diagnosis report to the user
-2. Use `AskUserQuestion` to ask the user how to resolve each issue:
+2. Use **batched** `AskUserQuestion` to ask the user how to resolve issues (up to 4 per batch):
+
+   ```
+   # Group issues into batches of up to 4
+   BATCH_SIZE = 4
+   batches = [issues[i:i+BATCH_SIZE] for i in range(0, len(issues), BATCH_SIZE)]
+
+   all_responses = []
+   For batch_num, batch in enumerate(batches):
+       questions = []
+       For idx, issue in enumerate(batch):
+           global_idx = batch_num * BATCH_SIZE + idx + 1
+
+           # Build options based on issue type
+           If issue.type in ["conflict", "superseded"]:
+               options = ["Deprecate (recommended)", "Skip"]
+           Elif issue.type == "duplicate":
+               options = ["Merge (recommended)", "Skip"]
+           Else:
+               options = ["Deprecate", "Merge", "Skip"]
+
+           questions.append({
+               "header": f"Issue #{global_idx}",
+               "question": f"[{issue.type.upper()}] {issue.decision_a.id} vs {issue.decision_b.id}\n  {issue.summary}",
+               "options": options
+           })
+
+       AskUserQuestion(questions=questions)
+       # Collect responses for this batch
+       all_responses.extend(batch responses)
+
+       If more batches remain:
+           echo "--- Batch {batch_num+1}/{len(batches)} complete. Continuing... ---"
+   ```
+
+   Option meanings:
    - **Deprecate** — Mark the older/conflicting decision as deprecated (recommended for conflicts and superseded)
    - **Merge** — Combine duplicate decisions into one (recommended for duplicates)
    - **Skip** — Keep both decisions as-is
+
 3. Apply the user's choices using the memory-doctor `--apply` command:
 
    **CRITICAL**: Construct a JSON array of the user's choices and save it to `_doctor_actions.json`. Each entry must include the full diagnosis context with `decision_a` and `decision_b` dicts (including `id` and `_source` fields):
@@ -751,25 +787,61 @@ Options:
 
 **If user selects "Discuss"**: Let the user discuss freely. After the discussion, repeat Step 9.2 (re-ask the question).
 
-**If user selects "Review Individually"**: For each decision, use `AskUserQuestion`:
+**If user selects "Review Individually"**: Group decisions into batches of up to 4 and use one `AskUserQuestion` per batch:
 
 ```
-Question: "[ADR-001] <title>
-  Context: <context>
-  Decision: <decision>
-  Rationale: <rationale>"
+# Group decisions into batches of up to 4
+BATCH_SIZE = 4
+decisions = [d for d in design_doc.decisions if d.status in ("accepted", "proposed")]
+batches = [decisions[i:i+BATCH_SIZE] for i in range(0, len(decisions), BATCH_SIZE)]
 
-Options:
-  1. "Accept" — Accept this decision
-  2. "Reject" — Remove this decision
-  3. "Modify" — Edit this decision before accepting
-  4. "Discuss" — Chat about this decision
+For batch_num, batch in enumerate(batches):
+    questions = []
+    For decision in batch:
+        questions.append({
+            "header": decision.id,  # e.g., "ADR-001" (max 12 chars)
+            "question": f"{decision.title}\n  Context: {decision.context}\n  Decision: {decision.decision}\n  Rationale: {decision.rationale}",
+            "options": ["Accept", "Reject", "Modify", "Discuss"]
+        })
+
+    AskUserQuestion(questions=questions)
+
+    # Process responses for this batch
+    needs_followup = []
+    For decision, response in zip(batch, batch_responses):
+        If response == "Accept":
+            Mark decision status as "accepted"
+        Elif response == "Reject":
+            Mark decision status as "rejected"
+        Elif response in ("Modify", "Discuss"):
+            needs_followup.append((decision, response))
+
+    # Handle Modify/Discuss individually after the batch
+    For decision, action in needs_followup:
+        If action == "Modify":
+            Let the user describe changes, update the decision in design_doc.json
+        Elif action == "Discuss":
+            Let the user chat about this decision
+
+        # Re-confirm this specific ADR individually
+        AskUserQuestion(
+            questions=[{
+                "header": decision.id,
+                "question": f"{decision.title}\n  Context: {decision.context}\n  Decision: {decision.decision}\n  Rationale: {decision.rationale}",
+                "options": ["Accept", "Reject", "Modify", "Discuss"]
+            }]
+        )
+        # If user selects Modify/Discuss again, repeat until Accept or Reject
+
+    If more batches remain:
+        echo "--- Batch {batch_num+1}/{len(batches)} complete. Continuing... ---"
 ```
 
-- **Accept**: Mark status as "accepted"
-- **Reject**: Mark status as "rejected"
-- **Modify**: Let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR
-- **Discuss**: Let the user chat, then re-ask for this specific ADR
+Response handling summary:
+- **Accept**: Mark status as "accepted" -- takes effect immediately
+- **Reject**: Mark status as "rejected" -- takes effect immediately
+- **Modify**: After the batch completes, let the user describe changes, update the decision in `design_doc.json`, then re-confirm this specific ADR individually
+- **Discuss**: After the batch completes, let the user chat, then re-ask for this specific ADR individually
 
 After all decisions are reviewed, re-run Step 5.4 to regenerate the Markdown files:
 ```bash
