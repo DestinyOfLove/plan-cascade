@@ -6,6 +6,17 @@ description: "Approve the current PRD and begin parallel story execution. Analyz
 
 You are approving the PRD and starting parallel execution of user stories.
 
+## Pseudocode Style Convention
+
+This document uses a hybrid pseudocode style. Follow these conventions consistently:
+
+- **Control flow**: Python-style (`If`, `Elif`, `Else`, `For`, `While`) — capitalize the keyword
+- **Variables**: snake_case (`story_id`, `gate_errors`, `full_git_diff`)
+- **Tool calls**: PascalCase matching Claude Code tools (`Task()`, `Read()`, `Bash()`, `TaskOutput()`)
+- **Shell commands**: Inline when short (`rm -f`, `git diff`); fenced `bash` blocks for multi-line scripts
+- **Booleans**: Python-style (`true`/`false` lowercase in config/flags; `True`/`False` in Python blocks)
+- **Comments**: `#` prefix, English for logic comments
+
 ## Execution Flow Parameters
 
 This command accepts flow control parameters that affect quality gates and execution:
@@ -1196,11 +1207,11 @@ Elif TDD_MODE == "auto":
         story_priority = completed_story.priority
         story_title = completed_story.title
         If tags contain "security|auth|database|payment|critical|sensitive":
-            run_tdd = true
+            run_tdd = true; break
         Elif priority == "high":
-            run_tdd = true
+            run_tdd = true; break
         Elif title matches "auth|login|password|credential|token|session|encrypt|secure|permission|role":
-            run_tdd = true
+            run_tdd = true; break
 
 enabled_gates = []
 If run_verify: enabled_gates.append("verify")
@@ -1261,6 +1272,10 @@ For each completed_story in batch:
     Else:
         git_diff = full_git_diff  # No mapping → fall back to full diff
 
+    # ── Write per-story diff to file (avoids embedding large diffs in prompts) ──
+    diff_file = ".agent-outputs/{story_id}.diff"
+    Write(diff_file, git_diff)
+
     # ── Gate 1: AI Verification ──
     If run_verify:
         VERIFY_PROMPT = """
@@ -1273,9 +1288,7 @@ For each completed_story in batch:
         {acceptance_criteria as bullet list}
 
         ## Git Diff (Changes Made)
-        ```diff
-        {git_diff}
-        ```
+        Read the diff from: .agent-outputs/{story_id}.diff
 
         ## Your Task
         Analyze the code changes and verify:
@@ -1334,9 +1347,7 @@ For each completed_story in batch:
         {description}
 
         ## Git Diff
-        ```diff
-        {git_diff}
-        ```
+        Read the diff from: .agent-outputs/{story_id}.diff
 
         ## Review Dimensions
         Score each dimension (total 100 points):
@@ -1726,17 +1737,15 @@ Else:  # GATE_MODE == "soft"
         exit 1
 ```
 
-**9.2.6.6: CLI Verification (Alternative)**
+**9.2.6.6: CLI Gate Execution (Alternative)**
 
-If using external LLM CLI for verification (configured in agents.json):
+If using external LLM CLI agents for quality gates (configured in agents.json):
 
 ```json
 {
-  "verification_gate": {
-    "type": "cli",
-    "command": "claude",
-    "args": ["-p", "{prompt}"],
-    "timeout": 120
+  "quality_gates_cli": {
+    "verify": { "command": "claude", "args": ["-p", "{prompt}"], "timeout": 120 },
+    "review": { "command": "claude", "args": ["-p", "{prompt}"], "timeout": 180 }
   }
 }
 ```
@@ -1745,24 +1754,42 @@ If using external LLM CLI for verification (configured in agents.json):
 Story descriptions may contain shell metacharacters (`'`, `` ` ``, `$()`) that enable injection.
 
 ```
-# SAFE: Write prompt to temp file, pass via file reference
-prompt_file = ".agent-outputs/{story_id}.verify.prompt"
-Write(prompt_file, VERIFY_PROMPT)
-
-# Sanitize story_id for path safety (alphanumeric, hyphens, underscores only)
+# For each CLI gate (verify, review), use the same safe pattern:
 safe_story_id = sanitize(story_id, allow="[a-zA-Z0-9_-]")
 
-# Execute CLI verification via file input (no shell interpolation)
-Bash(
-    command="claude -p \"$(cat .agent-outputs/{safe_story_id}.verify.prompt)\" > .agent-outputs/{safe_story_id}.verify.md",
-    timeout=120000
-)
+cli_tasks = []
 
-# Clean up prompt file
-rm -f ".agent-outputs/{safe_story_id}.verify.prompt"
+# ── Verify via CLI ──
+If run_verify AND VERIFY_AGENT is CLI type:
+    Write(".agent-outputs/{safe_story_id}.verify.prompt", VERIFY_PROMPT)
+    verify_cli = Bash(
+        command='claude -p "$(cat .agent-outputs/{safe_story_id}.verify.prompt)" > .agent-outputs/{safe_story_id}.verify.md',
+        run_in_background=true,
+        timeout=120000
+    )
+    cli_tasks.append((story_id, verify_cli, "verify"))
 
-# Parse output and write result to per-gate file
+# ── Review via CLI ──
+If run_review AND REVIEW_AGENT is CLI type:
+    Write(".agent-outputs/{safe_story_id}.review.prompt", REVIEW_PROMPT)
+    review_cli = Bash(
+        command='claude -p "$(cat .agent-outputs/{safe_story_id}.review.prompt)" > .agent-outputs/{safe_story_id}.review.md',
+        run_in_background=true,
+        timeout=180000
+    )
+    cli_tasks.append((story_id, review_cli, "review"))
+
+# ── Wait for all CLI gates (parallel) ──
+For story_id, task_id, gate_type in cli_tasks:
+    TaskOutput(task_id=task_id, block=true, timeout=180000)
+
+# Clean up prompt files
+rm -f .agent-outputs/*.prompt
+
+# Parse outputs and write result markers to per-gate .result files
 ```
+
+**Note**: TDD compliance is always inline (file-list comparison) — no CLI agent needed.
 
 **Notes**:
 - AI verification: Disable with `/approve --no-verify` or PRD config `"verification_gate": {"enabled": false}`
