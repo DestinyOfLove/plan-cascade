@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "commands/**"
+      - "skills/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "commands/**"
+      - "skills/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff check
+        run: ruff check src/
+
+      - name: Mypy type check
+        run: mypy src/
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  approve-md-sync:
+    name: Approve.md Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check approve.md files are in sync
+        run: |
+          # Normalize command-specific prefixes before diffing.
+          # commands/approve.md uses /plan-cascade:* prefixes
+          # skills/hybrid-ralph/commands/approve.md uses /hybrid:* or /hybrid-ralph:* prefixes
+          sed \
+            -e 's|/plan-cascade:hybrid-resume|/RESUME_CMD|g' \
+            -e 's|/plan-cascade:hybrid-complete|/COMPLETE_CMD|g' \
+            -e 's|/plan-cascade:hybrid-auto|/AUTO_CMD|g' \
+            -e 's|/plan-cascade:hybrid-manual|/MANUAL_CMD|g' \
+            -e 's|/plan-cascade:hybrid-status|/STATUS_CMD|g' \
+            -e 's|/plan-cascade:approve|/APPROVE_CMD|g' \
+            -e 's|/plan-cascade:edit|/EDIT_CMD|g' \
+            commands/approve.md > /tmp/commands-normalized.md
+
+          sed \
+            -e 's|/hybrid:resume|/RESUME_CMD|g' \
+            -e 's|/hybrid-ralph:resume|/RESUME_CMD|g' \
+            -e 's|/hybrid:complete|/COMPLETE_CMD|g' \
+            -e 's|/hybrid-ralph:complete|/COMPLETE_CMD|g' \
+            -e 's|/hybrid:auto|/AUTO_CMD|g' \
+            -e 's|/hybrid-ralph:auto|/AUTO_CMD|g' \
+            -e 's|/hybrid:manual|/MANUAL_CMD|g' \
+            -e 's|/hybrid-ralph:manual|/MANUAL_CMD|g' \
+            -e 's|/hybrid:status|/STATUS_CMD|g' \
+            -e 's|/hybrid-ralph:status|/STATUS_CMD|g' \
+            -e 's|/approve|/APPROVE_CMD|g' \
+            -e 's|/edit|/EDIT_CMD|g' \
+            -e 's|/hybrid-ralph:edit|/EDIT_CMD|g' \
+            skills/hybrid-ralph/commands/approve.md > /tmp/skills-normalized.md
+
+          # Strip Step 10+ (commands/ has in-place cleanup, skills/ does not)
+          # Compare only Steps 1-9 (quality gate logic)
+          sed '/^## Step 10/,$d' /tmp/commands-normalized.md > /tmp/commands-gates.md
+          sed '/^## Step 10/,$d' /tmp/skills-normalized.md > /tmp/skills-gates.md
+
+          if ! diff -u /tmp/commands-gates.md /tmp/skills-gates.md > /tmp/approve-diff.txt 2>&1; then
+            echo "::error::Quality gate sections (Steps 1-9) are out of sync between approve.md files!"
+            echo ""
+            echo "Differences (after normalizing command prefixes, up to Step 10):"
+            cat /tmp/approve-diff.txt
+            echo ""
+            echo "commands/approve.md and skills/hybrid-ralph/commands/approve.md must have"
+            echo "identical quality gate logic (Steps 1-9). Step 10+ may differ."
+            exit 1
+          else
+            echo "approve.md quality gate sections (Steps 1-9) are in sync."
+          fi

@@ -1219,18 +1219,19 @@ echo "Launching {len(enabled_gates)} quality gate(s) in parallel: {', '.join(ena
 For each completed story in the batch, launch all enabled gates simultaneously in a **single message with multiple tool calls**:
 
 ```
-# Get git diff ONCE (shared by all gates)
-git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
-
-# Get changed file list ONCE (shared by TDD gate)
+# Get changed file list ONCE (shared by all gates)
 # Hoisted outside the per-story loop to avoid redundant git calls
 changed_files = Bash("git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --cached --name-only 2>/dev/null || echo ''")
 
-# Load design context ONCE (shared by review gate)
-design_context = ""
+# Get full git diff ONCE (shared by verify and review gates)
+full_git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
+
+# Load design context ONCE (shared by review gate and per-story diff scoping)
+design_doc = null
+story_mappings = {}
 If design_doc.json exists:
-    Read design_doc.json
-    Extract story_mappings for each story
+    design_doc = Read and parse design_doc.json
+    story_mappings = design_doc.story_mappings or {}
 
 # Initialize task tracking lists
 verification_tasks = []   # List of (story_id, task_id) tuples
@@ -1239,6 +1240,26 @@ tdd_results = {}          # Dict of story_id → "passed" | "failed" (inline, no
 
 For each completed_story in batch:
     story_id = completed_story.id
+
+    # ── Per-story diff scoping ──
+    # If design_doc has story_mappings with file paths for this story,
+    # filter the diff to only those files. Otherwise fall back to full diff.
+    story_files = []
+    If story_id in story_mappings AND story_mappings[story_id] has "components":
+        For component_name in story_mappings[story_id].components:
+            component = find component_name in design_doc.architecture.components
+            If component and component.files:
+                story_files.extend(component.files)
+
+    If story_files is not empty:
+        # Intersect story_files with changed_files to get only relevant changed files
+        relevant_files = [f for f in changed_files if any(f.startswith(sf) or sf.startswith(f) for sf in story_files)]
+        If relevant_files is not empty:
+            git_diff = Bash("git diff HEAD~1 HEAD -- " + " ".join(relevant_files))
+        Else:
+            git_diff = full_git_diff  # No intersection → fall back to full diff
+    Else:
+        git_diff = full_git_diff  # No mapping → fall back to full diff
 
     # ── Gate 1: AI Verification ──
     If run_verify:
@@ -1285,12 +1306,23 @@ For each completed_story in batch:
         (a separate file from the detailed report). Do NOT append to progress.txt.
         """
 
-        verify_task = Task(
-            prompt=VERIFY_PROMPT,
-            subagent_type="general-purpose",
-            run_in_background=true,
-            description="Verify {story_id}"
-        )
+        # Route based on VERIFY_AGENT parameter
+        If VERIFY_AGENT is empty OR VERIFY_AGENT == "claude-code":
+            verify_task = Task(
+                prompt=VERIFY_PROMPT,
+                subagent_type="general-purpose",
+                run_in_background=true,
+                description="Verify {story_id}"
+            )
+        Else:
+            # CLI agent — resolve from agents.json
+            agent_config = agents[VERIFY_AGENT]
+            verify_command = build_cli_command(agent_config, VERIFY_PROMPT)
+            verify_task = Bash(
+                command=verify_command,
+                run_in_background=true,
+                timeout=agent_config.timeout or 120000
+            )
         verification_tasks.append((story_id, verify_task))
 
     # ── Gate 2: AI Code Review ──
@@ -1347,12 +1379,23 @@ For each completed_story in batch:
         (a separate file from the detailed report). Do NOT append to progress.txt.
         """
 
-        review_task = Task(
-            prompt=REVIEW_PROMPT,
-            subagent_type="general-purpose",
-            run_in_background=true,
-            description="Review {story_id}"
-        )
+        # Route based on REVIEW_AGENT parameter
+        If REVIEW_AGENT is empty OR REVIEW_AGENT == "claude-code":
+            review_task = Task(
+                prompt=REVIEW_PROMPT,
+                subagent_type="general-purpose",
+                run_in_background=true,
+                description="Review {story_id}"
+            )
+        Else:
+            # CLI agent — resolve from agents.json
+            agent_config = agents[REVIEW_AGENT]
+            review_command = build_cli_command(agent_config, REVIEW_PROMPT)
+            review_task = Bash(
+                command=review_command,
+                run_in_background=true,
+                timeout=agent_config.timeout or 180000
+            )
         review_tasks.append((story_id, review_task))
 
     # ── Gate 3: TDD Compliance (lightweight, inline — no subagent needed) ──
@@ -1466,7 +1509,11 @@ any_failures = (verify_failed_count > 0) or (review_issues_count > 0) or (tdd_fa
 
 **9.2.6.5: Handle Gate Failures (Unified)**
 
-If any gate reported failures, handle them together based on GATE_MODE:
+If any gate reported failures, handle them based on GATE_MODE and per-gate configuration flags.
+
+**Gate configuration semantics:**
+- `REQUIRE_REVIEW` (set by `--flow full`): When true, review failures MUST be addressed — no "Skip" option. Offers "Auto-fix + Re-review" to ensure findings are acted on.
+- `ENFORCE_TEST_CHANGES` (set by `--flow full`): When true, TDD failures MUST be addressed — only "Add Tests" or "Pause" allowed, no "Retry" (which could bypass test requirement).
 
 ```
 If any_failures == false:
@@ -1478,7 +1525,7 @@ echo ""
 echo "⚠️ QUALITY GATE FAILURES DETECTED"
 echo ""
 
-# List all failures
+# List all failures with details
 If verify_failed_count > 0:
     echo "Verification failures:"
     For each verify_failed story: echo "  - {story_id}: {reason}"
@@ -1508,23 +1555,97 @@ If GATE_MODE == "hard":
     If review_issues_count > 0: failure_summary.append("Code Review: {review_issues_count} issues")
     If tdd_failed_count > 0: failure_summary.append("TDD: {tdd_failed_count} non-compliant")
 
+    # ── Build options dynamically based on gate config flags ──
+    options = []
+
+    # Review failures: behavior depends on REQUIRE_REVIEW
+    If review_issues_count > 0 AND REQUIRE_REVIEW == true:
+        options.append({"label": "Auto-fix + Re-review", "description": "Apply automated fixes for review findings, then re-run code review"})
+    Elif verify_failed_count > 0 OR review_issues_count > 0:
+        options.append({"label": "Retry", "description": "Re-implement failed stories with different agent"})
+
+    # TDD failures: behavior depends on ENFORCE_TEST_CHANGES
+    If tdd_failed_count > 0:
+        options.append({"label": "Add Tests", "description": "Launch test-writing agent for TDD-failing stories"})
+
+    # Pause is always available
+    options.append({"label": "Pause", "description": "Pause for manual intervention"})
+
     AskUserQuestion(
         questions=[{
             "question": f"Quality gates failed: {'; '.join(failure_summary)}. How do you want to proceed?",
             "header": "Gate Blocked",
-            "options": [
-                {"label": "Retry", "description": "Re-implement failed stories with different agent"},
-                {"label": "Add Tests", "description": "Write tests for TDD-failing stories (if applicable)"},
-                {"label": "Pause", "description": "Pause for manual intervention"}
-            ],
+            "options": options,
             "multiSelect": false
         }]
     )
 
-    If answer == "Retry":
+    If answer == "Auto-fix + Re-review":
+        # Launch fix agent targeting review findings, then re-run review gate
+        For each story_with_review_issues:
+            review_report = Read(".agent-outputs/{story_id}.review.md")
+
+            FIX_PROMPT = """
+            You are a code fix agent. Apply fixes for the code review findings below.
+
+            ## Review Report
+            {review_report content}
+
+            ## Instructions
+            1. Read each finding (especially critical and high severity)
+            2. Apply the suggested fix for each finding
+            3. Do NOT introduce new issues
+            4. After fixing, write "[FIX_APPLIED] {story_id}" to .agent-outputs/{story_id}.fix.result
+            """
+
+            Task(
+                prompt=FIX_PROMPT,
+                subagent_type="general-purpose",
+                run_in_background=true,
+                description="Fix review issues {story_id}"
+            )
+
+        # Wait for fix agents, then re-run review gate for those stories
+        # (go back to 9.2.6.2 review launch for the affected stories only)
+
+    Elif answer == "Retry":
         # Go to Step 9.2.5 retry logic for verify/review failures
+
     Elif answer == "Add Tests":
-        # Launch test writing agent for TDD-failing stories
+        # Launch test-writing agent for TDD-failing stories
+        For each tdd_failed_story:
+            TEST_PROMPT = """
+            You are a test-writing agent. Write tests for story {story_id}.
+
+            ## Story: {story_id} - {title}
+            {description}
+
+            ## Acceptance Criteria
+            {acceptance_criteria as bullet list}
+
+            ## Changed Code Files (no tests yet)
+            {list code_files that lack corresponding test files}
+
+            ## Instructions
+            1. Identify testable behaviors from the acceptance criteria
+            2. Create test files following the project's test conventions
+            3. Write meaningful tests (not just stubs) covering:
+               - Happy path for each acceptance criterion
+               - Edge cases and error handling
+               - Integration points if applicable
+            4. Run the tests to verify they pass
+            5. After completion, write "[TESTS_ADDED] {story_id}" to .agent-outputs/{story_id}.tests.result
+            """
+
+            Task(
+                prompt=TEST_PROMPT,
+                subagent_type="general-purpose",
+                run_in_background=true,
+                description="Write tests for {story_id}"
+            )
+
+        # Wait for test agents, then re-run TDD gate for those stories
+
     Else:
         echo "Execution paused. Fix issues and resume with /hybrid:resume"
         exit 1
