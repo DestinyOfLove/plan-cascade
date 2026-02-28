@@ -1165,162 +1165,353 @@ For each failed_story in failed_stories:
         # Pause for manual intervention
 ```
 
-### 9.2.6: AI Verification Gate (Default Enabled)
+### 9.2.6: Parallel Quality Gates (Verify + Review + TDD)
 
-If `ENABLE_VERIFY` is true (default), run AI verification for completed stories to ensure acceptance criteria are met and no skeleton code exists.
-
-**Verification Gate Types:**
-
-| Type | Implementation | Requires |
-|------|----------------|----------|
-| `task-tool` (default) | Task subagent | Nothing extra |
-| `cli` | External LLM CLI | CLI tool installed |
-
-**9.2.6.1: Task-Tool Verification (Recommended)**
-
-For each completed story, launch a verification subagent:
+**CRITICAL**: The three quality gates (AI Verification, AI Code Review, TDD Compliance) are **independent** — they all read the same git diff but produce separate judgments. Launch all enabled gates **in parallel** to reduce total gate time.
 
 ```
-If ENABLE_VERIFY == false:
-    Skip verification for all stories
-    Continue to Step 9.2.7 (Code Review)
+============================================================
+QUALITY GATES — Parallel Execution
+============================================================
+  AI Verification: ${ENABLE_VERIFY ? "enabled" : "DISABLED"}
+  Code Review:     ${ENABLE_REVIEW ? "enabled" : "DISABLED"}${REQUIRE_REVIEW ? " (REQUIRED)" : ""}
+  TDD Compliance:  ${check_tdd ? "enabled" : "DISABLED"}
+============================================================
+```
+
+**9.2.6.1: Determine Which Gates to Run**
+
+```
+# Collect gate flags
+run_verify = ENABLE_VERIFY  # default true, disabled by --no-verify
+run_review = ENABLE_REVIEW  # default true, disabled by --no-review
+
+# TDD gate: enabled for "on" mode or auto-detected high-risk stories
+run_tdd = false
+If TDD_MODE == "on":
+    run_tdd = true
+Elif TDD_MODE == "auto":
+    For each completed_story in batch:
+        story_tags = completed_story.tags
+        story_priority = completed_story.priority
+        story_title = completed_story.title
+        If tags contain "security|auth|database|payment|critical|sensitive":
+            run_tdd = true
+        Elif priority == "high":
+            run_tdd = true
+        Elif title matches "auth|login|password|credential|token|session|encrypt|secure|permission|role":
+            run_tdd = true
+
+enabled_gates = []
+If run_verify: enabled_gates.append("verify")
+If run_review: enabled_gates.append("review")
+If run_tdd: enabled_gates.append("tdd")
+
+If len(enabled_gates) == 0:
+    echo "All quality gates disabled. Skipping to Step 9.3."
+    Continue to Step 9.3
+
+echo "Launching {len(enabled_gates)} quality gate(s) in parallel: {', '.join(enabled_gates)}"
+```
+
+**9.2.6.2: Parallel Launch — All Gates at Once**
+
+For each completed story in the batch, launch all enabled gates simultaneously in a **single message with multiple tool calls**:
+
+```
+# Get git diff ONCE (shared by all gates)
+git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
+
+# Load design context ONCE (shared by review gate)
+design_context = ""
+If design_doc.json exists:
+    Read design_doc.json
+    Extract story_mappings for each story
 
 For each completed_story in batch:
     story_id = completed_story.id
 
-    # Get git diff for this story's changes
-    git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
+    # ── Gate 1: AI Verification ──
+    If run_verify:
+        VERIFY_PROMPT = """
+        You are an implementation verification agent. Verify that story {story_id} is properly implemented.
 
-    # Build verification prompt
-    VERIFY_PROMPT = """
-    You are an implementation verification agent. Verify that story {story_id} is properly implemented.
+        ## Story: {story_id} - {title}
+        {description}
 
-    ## Story: {story_id} - {title}
-    {description}
+        ## Acceptance Criteria
+        {acceptance_criteria as bullet list}
 
-    ## Acceptance Criteria
-    {acceptance_criteria as bullet list}
+        ## Git Diff (Changes Made)
+        ```diff
+        {git_diff}
+        ```
 
-    ## Git Diff (Changes Made)
-    ```diff
-    {git_diff}
-    ```
+        ## Your Task
+        Analyze the code changes and verify:
+        1. Each acceptance criterion is implemented (not just stubbed)
+        2. No skeleton code (pass, ..., NotImplementedError, TODO, FIXME in new code)
+        3. The implementation is functional, not placeholder
 
-    ## Your Task
-    Analyze the code changes and verify:
-    1. Each acceptance criterion is implemented (not just stubbed)
-    2. No skeleton code (pass, ..., NotImplementedError, TODO, FIXME in new code)
-    3. The implementation is functional, not placeholder
+        ## Skeleton Code Detection Rules
+        Mark as FAILED if you find ANY of these in NEW code:
+        - Functions with only `pass`, `...`, or `raise NotImplementedError`
+        - TODO/FIXME comments in newly added code
+        - Placeholder return values like `return None`, `return ""`, `return []` without logic
+        - Empty function/method bodies
+        - Comments like "# implement later" or "# stub"
 
-    ## Skeleton Code Detection Rules
-    Mark as FAILED if you find ANY of these in NEW code:
-    - Functions with only `pass`, `...`, or `raise NotImplementedError`
-    - TODO/FIXME comments in newly added code
-    - Placeholder return values like `return None`, `return ""`, `return []` without logic
-    - Empty function/method bodies
-    - Comments like "# implement later" or "# stub"
+        ## Output Format
+        After analysis, append ONE of these to progress.txt:
 
-    ## Output Format
-    After analysis, append ONE of these to progress.txt:
+        If ALL criteria met and NO skeleton code:
+          [VERIFIED] {story_id} - All acceptance criteria implemented
 
-    If ALL criteria met and NO skeleton code:
-      [VERIFIED] {story_id} - All acceptance criteria implemented
+        If issues found:
+          [VERIFY_FAILED] {story_id} - <brief reason>
 
-    If issues found:
-      [VERIFY_FAILED] {story_id} - <brief reason>
+        Then write a detailed verification report to .agent-outputs/{story_id}.verify.md
+        """
 
-    Then write a detailed verification report to .agent-outputs/{story_id}.verify.md
-    """
+        verify_task = Task(
+            prompt=VERIFY_PROMPT,
+            subagent_type="general-purpose",
+            run_in_background=true,
+            description="Verify {story_id}"
+        )
 
-    # Launch verification subagent
-    Task(
-        prompt=VERIFY_PROMPT,
-        subagent_type="general-purpose",
-        run_in_background=true,
-        description="Verify {story_id}"
-    )
-    Store verify_task_id for monitoring
+    # ── Gate 2: AI Code Review ──
+    If run_review:
+        REVIEW_PROMPT = """
+        You are an AI code reviewer. Review story {story_id} implementation for quality.
+
+        ## Story: {story_id} - {title}
+        {description}
+
+        ## Git Diff
+        ```diff
+        {git_diff}
+        ```
+
+        ## Review Dimensions
+        Score each dimension (total 100 points):
+
+        1. Code Quality (25 pts) - Clean code, error handling, no code smells
+        2. Naming & Clarity (20 pts) - Clear naming, self-documenting code
+        3. Complexity (20 pts) - Appropriate complexity, no over-engineering
+        4. Pattern Adherence (20 pts) - Follows project patterns
+        5. Security (15 pts) - No vulnerabilities, proper input validation
+
+        {If design_doc.json exists:}
+        ## Architecture Context
+        Components: {relevant_components}
+        Patterns: {relevant_patterns}
+        ADRs: {relevant_adrs}
+        {End if}
+
+        ## Severity Levels
+        - critical: Must fix (security, data loss)
+        - high: Should fix (bugs, poor patterns)
+        - medium: Consider fixing (code smells)
+        - low: Minor suggestions
+        - info: Informational notes
+
+        ## Output Format
+        After analysis, append ONE of these to progress.txt:
+
+        If score >= 70% AND no critical findings:
+          [REVIEW_PASSED] {story_id} - Score: X/100
+
+        If score < 70% OR has critical findings:
+          [REVIEW_ISSUES] {story_id} - Score: X/100 - <brief summary>
+
+        Then write detailed report to .agent-outputs/{story_id}.review.md with:
+        - Dimension scores and notes
+        - All findings with severity, file, line
+        - Suggestions for improvement
+        """
+
+        review_task = Task(
+            prompt=REVIEW_PROMPT,
+            subagent_type="general-purpose",
+            run_in_background=true,
+            description="Review {story_id}"
+        )
+
+    # ── Gate 3: TDD Compliance (lightweight, no subagent needed) ──
+    If run_tdd:
+        # TDD check is lightweight — run inline, not as subagent
+        changed_files = Bash("git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --cached --name-only 2>/dev/null || echo ''")
+        code_files = filter changed_files for code extensions, excluding test patterns
+        test_files = filter changed_files for test patterns
+
+        If code_files exist AND test_files empty:
+            echo "[TDD_FAILED] {story_id} - Code changes without tests" >> progress.txt
+        Else:
+            echo "[TDD_PASSED] {story_id}" >> progress.txt
+
+# IMPORTANT: Launch verify_task and review_task in the SAME message
+# (multiple tool calls in one response) so they run in parallel.
+# TDD check runs inline since it's just a file-list comparison.
 ```
 
-**9.2.6.2: Wait for Verification and Handle Results**
+**CRITICAL**: The verify and review Task calls MUST be in a **single message with multiple tool calls** to ensure true parallel execution. Do NOT launch one, wait for it, then launch the next.
+
+**Example of correct parallel launch:**
+```
+# In a SINGLE response, make both tool calls:
+Task(prompt=VERIFY_PROMPT, subagent_type="general-purpose", run_in_background=true)
+Task(prompt=REVIEW_PROMPT, subagent_type="general-purpose", run_in_background=true)
+# Both agents start immediately and run concurrently
+```
+
+**9.2.6.3: Wait for All Gates**
 
 ```
-For each story_id, verify_task_id in verification_tasks:
-    result = TaskOutput(
-        task_id=verify_task_id,
-        block=true,
-        timeout=120000  # 2 minutes per verification
-    )
+# Wait for all background gate agents to complete
+all_task_ids = []
+If run_verify: all_task_ids.extend(verify_task_ids)
+If run_review: all_task_ids.extend(review_task_ids)
 
-# Check verification results
+For each task_id in all_task_ids:
+    TaskOutput(task_id=task_id, block=true, timeout=180000)
+
+echo "All quality gates completed."
+```
+
+**9.2.6.4: Collect and Display Unified Results**
+
+```
+# Read progress.txt ONCE to check all gate results
 progress_content = Read("progress.txt")
+
+# Verification results
 verified_count = count "[VERIFIED]" in progress_content
 verify_failed_count = count "[VERIFY_FAILED]" in progress_content
 
-echo "Verification Results:"
-echo "  Passed: {verified_count}"
-echo "  Failed: {verify_failed_count}"
+# Review results
+review_passed_count = count "[REVIEW_PASSED]" in progress_content
+review_issues_count = count "[REVIEW_ISSUES]" in progress_content
 
-If verify_failed_count > 0:
-    echo ""
-    echo "⚠️ VERIFICATION FAILURES DETECTED"
-    # List failed stories and reasons
+# TDD results
+tdd_passed_count = count "[TDD_PASSED]" in progress_content
+tdd_failed_count = count "[TDD_FAILED]" in progress_content
 
-    # **CRITICAL**: Handle based on GATE_MODE
-    If GATE_MODE == "hard":
-        echo ""
-        echo "============================================================"
-        echo "🛑 HARD GATE: EXECUTION BLOCKED"
-        echo "============================================================"
-        echo "Flow Level FULL requires all verifications to pass."
-        echo "Failed stories must be fixed before continuing."
-        echo ""
+echo ""
+echo "============================================================"
+echo "QUALITY GATE RESULTS"
+echo "============================================================"
+If run_verify:
+    echo "  Verification: {verified_count} passed, {verify_failed_count} failed"
+If run_review:
+    echo "  Code Review:  {review_passed_count} passed, {review_issues_count} issues"
+If run_tdd:
+    echo "  TDD:          {tdd_passed_count} passed, {tdd_failed_count} failed"
+echo "============================================================"
 
-        # BLOCK execution - no option to skip
-        AskUserQuestion(
-            questions=[{
-                "question": "Verification failed. How do you want to proceed?",
-                "header": "Gate Blocked",
-                "options": [
-                    {"label": "Retry", "description": "Re-implement failed stories with different agent"},
-                    {"label": "Pause", "description": "Pause for manual intervention"}
-                ],
-                "multiSelect": false
-            }]
-        )
-
-        If answer == "Retry":
-            # Go to Step 9.2.5 retry logic
-        Else:
-            echo "Execution paused. Fix issues and resume with /plan-cascade:hybrid-resume"
-            exit 1
-
-    Else:  # GATE_MODE == "soft"
-        echo ""
-        echo "⚠️ SOFT GATE: Warnings only"
-        echo ""
-
-        # Offer options including skip
-        AskUserQuestion(
-            questions=[{
-                "question": "Verification failed. How do you want to proceed?",
-                "header": "Verify Failed",
-                "options": [
-                    {"label": "Retry", "description": "Re-implement with different agent"},
-                    {"label": "Skip", "description": "Skip verification and continue (warnings noted)"},
-                    {"label": "Pause", "description": "Pause for manual review"}
-                ],
-                "multiSelect": false
-            }]
-        )
-
-        If answer == "Skip":
-            For each failed_story:
-                echo "[VERIFY_SKIPPED] {story_id}" >> progress.txt
-            # Continue to code review
+# Determine overall gate status
+any_failures = (verify_failed_count > 0) or (review_issues_count > 0) or (tdd_failed_count > 0)
 ```
 
-**9.2.6.3: CLI Verification (Alternative)**
+**9.2.6.5: Handle Gate Failures (Unified)**
+
+If any gate reported failures, handle them together based on GATE_MODE:
+
+```
+If any_failures == false:
+    echo "✓ All quality gates passed."
+    Continue to Step 9.2.9 (DoD Gate)
+
+# ── Failures detected ──
+echo ""
+echo "⚠️ QUALITY GATE FAILURES DETECTED"
+echo ""
+
+# List all failures
+If verify_failed_count > 0:
+    echo "Verification failures:"
+    For each verify_failed story: echo "  - {story_id}: {reason}"
+
+If review_issues_count > 0:
+    echo "Code review issues:"
+    For each review_issues story:
+        review_report = Read(".agent-outputs/{story_id}.review.md")
+        echo "  - {story_id}: Score X/100"
+
+If tdd_failed_count > 0:
+    echo "TDD compliance failures:"
+    For each tdd_failed story: echo "  - {story_id}: Code changes without tests"
+
+# ── Handle based on GATE_MODE ──
+If GATE_MODE == "hard":
+    echo ""
+    echo "============================================================"
+    echo "HARD GATE: EXECUTION BLOCKED"
+    echo "============================================================"
+    echo "Flow Level FULL requires all quality gates to pass."
+    echo ""
+
+    # Build failure summary for the question
+    failure_summary = []
+    If verify_failed_count > 0: failure_summary.append("Verification: {verify_failed_count} failed")
+    If review_issues_count > 0: failure_summary.append("Code Review: {review_issues_count} issues")
+    If tdd_failed_count > 0: failure_summary.append("TDD: {tdd_failed_count} non-compliant")
+
+    AskUserQuestion(
+        questions=[{
+            "question": f"Quality gates failed: {'; '.join(failure_summary)}. How do you want to proceed?",
+            "header": "Gate Blocked",
+            "options": [
+                {"label": "Retry", "description": "Re-implement failed stories with different agent"},
+                {"label": "Add Tests", "description": "Write tests for TDD-failing stories (if applicable)"},
+                {"label": "Pause", "description": "Pause for manual intervention"}
+            ],
+            "multiSelect": false
+        }]
+    )
+
+    If answer == "Retry":
+        # Go to Step 9.2.5 retry logic for verify/review failures
+    Elif answer == "Add Tests":
+        # Launch test writing agent for TDD-failing stories
+    Else:
+        echo "Execution paused. Fix issues and resume with /plan-cascade:hybrid-resume"
+        exit 1
+
+Else:  # GATE_MODE == "soft"
+    echo ""
+    echo "⚠️ SOFT GATE: Warnings only"
+    echo ""
+
+    AskUserQuestion(
+        questions=[{
+            "question": "Quality gate issues found. How do you want to proceed?",
+            "header": "Gate Warnings",
+            "options": [
+                {"label": "Continue", "description": "Acknowledge warnings and continue"},
+                {"label": "Retry", "description": "Re-implement failed stories"},
+                {"label": "Pause", "description": "Pause for manual review"}
+            ],
+            "multiSelect": false
+        }]
+    )
+
+    If answer == "Continue":
+        If verify_failed_count > 0:
+            For each failed_story: echo "[VERIFY_SKIPPED] {story_id}" >> progress.txt
+        If review_issues_count > 0:
+            For each issues_story: echo "[REVIEW_ACKNOWLEDGED] {story_id}" >> progress.txt
+        If tdd_failed_count > 0:
+            For each tdd_story: echo "[TDD_WARNING] {story_id} - Code changes without tests" >> progress.txt
+        # Continue to DoD gate
+    Elif answer == "Retry":
+        # Go to Step 9.2.5 retry logic
+    Else:
+        echo "Execution paused. Resume with /plan-cascade:hybrid-resume"
+        exit 1
+```
+
+**9.2.6.6: CLI Verification (Alternative)**
 
 If using external LLM CLI for verification (configured in agents.json):
 
@@ -1345,307 +1536,11 @@ Bash(
 # Parse output and update progress.txt accordingly
 ```
 
-**9.2.6.4: Handling Verification Failures**
-
-```
-For each verify_failed_story:
-    echo ""
-    echo "Story {story_id} failed verification:"
-    echo "  Reason: {reason from progress.txt}"
-    echo ""
-    echo "Options:"
-    echo "  1. Retry implementation with different agent"
-    echo "  2. Skip verification and continue"
-    echo "  3. Pause for manual review"
-
-    # Use AskUserQuestion to get user choice
-    If choice == 1:
-        # Go to Step 9.2.5 retry logic
-    Elif choice == 2:
-        echo "[VERIFY_SKIPPED] {story_id}" >> progress.txt
-        # Continue to next batch
-    Else:
-        # Pause execution
-        exit
-```
-
-**Note**: AI verification is enabled by default. Disable with:
-- Command flag: `/plan-cascade:approve --no-verify`
-- PRD config: `"verification_gate": {"enabled": false}`
-
-### 9.2.7: AI Code Review (Default Enabled)
-
-If `ENABLE_REVIEW` is true (default), run code review for completed and verified stories.
-
-**9.2.7.1: Review Prompt and Execution**
-
-For each story that passed verification (or if verification is disabled), launch a code review subagent:
-
-```
-If ENABLE_REVIEW == false:
-    Skip review for all stories
-    Continue to Step 9.3 (Next Batch)
-
-For each completed_story in batch:
-    story_id = completed_story.id
-
-    # Get git diff for this story's changes
-    git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
-
-    # Load design document context if available
-    design_context = ""
-    If design_doc.json exists:
-        Read design_doc.json
-        Get story_mappings[story_id] for relevant:
-          - Components
-          - Patterns
-          - ADRs
-
-    REVIEW_PROMPT = """
-    You are an AI code reviewer. Review story {story_id} implementation for quality.
-
-    ## Story: {story_id} - {title}
-    {description}
-
-    ## Git Diff
-    ```diff
-    {git_diff}
-    ```
-
-    ## Review Dimensions
-    Score each dimension (total 100 points):
-
-    1. Code Quality (25 pts) - Clean code, error handling, no code smells
-    2. Naming & Clarity (20 pts) - Clear naming, self-documenting code
-    3. Complexity (20 pts) - Appropriate complexity, no over-engineering
-    4. Pattern Adherence (20 pts) - Follows project patterns
-    5. Security (15 pts) - No vulnerabilities, proper input validation
-
-    {If design_doc.json exists:}
-    ## Architecture Context
-    Components: {relevant_components}
-    Patterns: {relevant_patterns}
-    ADRs: {relevant_adrs}
-    {End if}
-
-    ## Severity Levels
-    - critical: Must fix (security, data loss)
-    - high: Should fix (bugs, poor patterns)
-    - medium: Consider fixing (code smells)
-    - low: Minor suggestions
-    - info: Informational notes
-
-    ## Output Format
-    After analysis, append ONE of these to progress.txt:
-
-    If score >= 70% AND no critical findings:
-      [REVIEW_PASSED] {story_id} - Score: X/100
-
-    If score < 70% OR has critical findings:
-      [REVIEW_ISSUES] {story_id} - Score: X/100 - <brief summary>
-
-    Then write detailed report to .agent-outputs/{story_id}.review.md with:
-    - Dimension scores and notes
-    - All findings with severity, file, line
-    - Suggestions for improvement
-    """
-
-    # Launch review subagent
-    Task(
-        prompt=REVIEW_PROMPT,
-        subagent_type="general-purpose",
-        run_in_background=true,
-        description="Review {story_id}"
-    )
-    Store review_task_id for monitoring
-```
-
-**9.2.7.2: Wait for Code Reviews**
-
-```
-For each story_id, review_task_id in review_tasks:
-    result = TaskOutput(
-        task_id=review_task_id,
-        block=true,
-        timeout=180000  # 3 minutes per review
-    )
-
-# Check review results
-progress_content = Read("progress.txt")
-review_passed_count = count "[REVIEW_PASSED]" in progress_content
-review_issues_count = count "[REVIEW_ISSUES]" in progress_content
-
-echo "Code Review Results:"
-echo "  Passed: {review_passed_count}"
-echo "  Issues: {review_issues_count}"
-
-If review_issues_count > 0:
-    echo "⚠️ CODE REVIEW ISSUES DETECTED"
-    # List stories with issues
-```
-
-**9.2.7.3: Handling Review Issues (with GATE_MODE)**
-
-```
-If review_issues_count > 0:
-    echo ""
-    echo "⚠️ CODE REVIEW ISSUES DETECTED"
-
-    # **CRITICAL**: Handle based on GATE_MODE and REQUIRE_REVIEW
-    If GATE_MODE == "hard" AND REQUIRE_REVIEW == true:
-        echo ""
-        echo "============================================================"
-        echo "🛑 HARD GATE: CODE REVIEW REQUIRED"
-        echo "============================================================"
-        echo "Flow Level FULL requires all code reviews to pass."
-        echo ""
-
-        For each story_with_issues:
-            echo "Story {story_id}: Score X/100"
-            review_report = Read(".agent-outputs/{story_id}.review.md")
-            # Summarize critical findings
-
-        # BLOCK execution - require fix or pause
-        AskUserQuestion(
-            questions=[{
-                "question": "Code review issues found. How do you want to proceed?",
-                "header": "Review Required",
-                "options": [
-                    {"label": "Auto-fix", "description": "Apply automated fixes and re-review"},
-                    {"label": "Pause", "description": "Pause for manual fixes"}
-                ],
-                "multiSelect": false
-            }]
-        )
-
-        If answer == "Auto-fix":
-            # Launch fix agent
-            # Rerun review after fixes
-        Else:
-            echo "Execution paused. Fix review issues and resume with /plan-cascade:hybrid-resume"
-            exit 1
-
-    Else:  # GATE_MODE == "soft" or REQUIRE_REVIEW == false
-        For each story_with_issues:
-            echo ""
-            echo "Story {story_id} has review issues:"
-            review_report = Read(".agent-outputs/{story_id}.review.md")
-            echo "  Score: X/100"
-            echo "  Critical findings: Y"
-
-        # Offer options including continue
-        AskUserQuestion(
-            questions=[{
-                "question": "Code review issues found. How do you want to proceed?",
-                "header": "Review Issues",
-                "options": [
-                    {"label": "Continue", "description": "Acknowledge and continue (warnings noted)"},
-                    {"label": "Auto-fix", "description": "Apply fixes and re-review"},
-                    {"label": "Pause", "description": "Pause for manual review"}
-                ],
-                "multiSelect": false
-            }]
-        )
-
-        If answer == "Continue":
-            For each story_with_issues:
-                echo "[REVIEW_ACKNOWLEDGED] {story_id}" >> progress.txt
-            # Continue to next batch
-```
-
-**Note**: AI code review is enabled by default. Disable with:
-- Command flag: `/plan-cascade:approve --no-review`
-- PRD config: `"code_review": {"enabled": false}"`
-
-### 9.2.8: TDD Compliance Gate (if TDD_MODE is set)
-
-**CRITICAL**: Check TDD compliance for "on" mode OR high-risk stories in "auto" mode.
-
-```bash
-# Check TDD compliance for on mode OR high-risk stories in auto mode
-check_tdd=false
-
-if [ "${TDD_MODE}" == "on" ]; then
-    check_tdd=true
-    echo "TDD mode: on (explicit)"
-elif [ "${TDD_MODE}" == "auto" ]; then
-    # Auto-enable for high-risk stories based on tags and priority
-    story_tags=$(echo "${story}" | jq -r '.tags // [] | .[]' 2>/dev/null || echo "")
-    story_priority=$(echo "${story}" | jq -r '.priority // "medium"' 2>/dev/null || echo "medium")
-    story_title=$(echo "${story}" | jq -r '.title // ""' 2>/dev/null || echo "")
-
-    # Check for high-risk tags
-    if echo "${story_tags}" | grep -qiE "security|auth|authentication|database|payment|critical|sensitive"; then
-        check_tdd=true
-        echo "TDD auto-enabled: high-risk tags detected (${story_tags})"
-    # Check for high priority
-    elif [ "${story_priority}" == "high" ]; then
-        check_tdd=true
-        echo "TDD auto-enabled: high priority story"
-    # Check for security-related keywords in title
-    elif echo "${story_title}" | grep -qiE "auth|login|password|credential|token|session|encrypt|secure|permission|role"; then
-        check_tdd=true
-        echo "TDD auto-enabled: security-related story title"
-    fi
-fi
-
-if [ "$check_tdd" == "true" ]; then
-    echo ""
-    echo "Checking TDD compliance..."
-```
-
-For each completed story, check for test file changes:
-
-```
-    For each completed_story in batch:
-        # Get changed files (safer approach with fallback)
-        changed_files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --cached --name-only 2>/dev/null || echo "")
-
-        if [ -n "$changed_files" ]; then
-            # Filter to code files (excluding tests)
-            code_files=$(echo "$changed_files" | grep -E '\.(py|ts|tsx|js|jsx|rs|go|java|rb|php|cs)$' | grep -vE 'test_|_test\.|\.test\.|/tests/|/test/|/spec/|__tests__' || echo "")
-
-            # Filter to test files
-            test_files=$(echo "$changed_files" | grep -E 'test_|_test\.|\.test\.|/tests/|/test/|/spec/|__tests__' || echo "")
-
-            if [ -n "$code_files" ] && [ -z "$test_files" ]; then
-                echo "⚠️ TDD Compliance Issue: {story_id}"
-                echo "  Code changes: $(echo "$code_files" | wc -l | tr -d ' ') files"
-                echo "  Test changes: 0 files"
-                echo "  TDD requires test changes alongside code changes."
-
-                If GATE_MODE == "hard" AND ENFORCE_TEST_CHANGES == true:
-                    echo ""
-                    echo "🛑 HARD GATE: TEST CHANGES REQUIRED"
-                    echo "Flow Level FULL requires test file changes with code changes."
-
-                    AskUserQuestion(
-                        questions=[{
-                            "question": "No test changes detected. How do you want to proceed?",
-                            "header": "TDD Required",
-                            "options": [
-                                {"label": "Add Tests", "description": "Write tests for the implementation"},
-                                {"label": "Pause", "description": "Pause for manual test writing"}
-                            ],
-                            "multiSelect": false
-                        }]
-                    )
-
-                    If answer == "Add Tests":
-                        # Launch test writing agent
-                    Else:
-                        echo "Execution paused. Add tests and resume."
-                        exit 1
-
-                Else:  # GATE_MODE == "soft"
-                    echo "[TDD_WARNING] {story_id} - Code changes without tests" >> progress.txt
-
-            Else:
-                echo "✓ TDD Compliance: {story_id}"
-                echo "[TDD_PASSED] {story_id}" >> progress.txt
-        fi
-fi
-```
+**Notes**:
+- AI verification: Disable with `/plan-cascade:approve --no-verify` or PRD config `"verification_gate": {"enabled": false}`
+- AI code review: Disable with `/plan-cascade:approve --no-review` or PRD config `"code_review": {"enabled": false}"`
+- TDD compliance: Controlled by `--tdd off|on|auto`
+- **Performance**: Parallel gate execution reduces total gate time from `verify_time + review_time + tdd_time` to `max(verify_time, review_time, tdd_time)`
 
 ### 9.2.9: Definition of Done (DoD) Gate
 
