@@ -1175,7 +1175,7 @@ QUALITY GATES — Parallel Execution
 ============================================================
   AI Verification: ${ENABLE_VERIFY ? "enabled" : "DISABLED"}
   Code Review:     ${ENABLE_REVIEW ? "enabled" : "DISABLED"}${REQUIRE_REVIEW ? " (REQUIRED)" : ""}
-  TDD Compliance:  ${check_tdd ? "enabled" : "DISABLED"}
+  TDD Compliance:  ${run_tdd ? "enabled" : "DISABLED"}
 ============================================================
 ```
 
@@ -1222,11 +1222,20 @@ For each completed story in the batch, launch all enabled gates simultaneously i
 # Get git diff ONCE (shared by all gates)
 git_diff = Bash("git diff HEAD~1 HEAD -- . 2>/dev/null || git diff HEAD -- .")
 
+# Get changed file list ONCE (shared by TDD gate)
+# Hoisted outside the per-story loop to avoid redundant git calls
+changed_files = Bash("git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --cached --name-only 2>/dev/null || echo ''")
+
 # Load design context ONCE (shared by review gate)
 design_context = ""
 If design_doc.json exists:
     Read design_doc.json
     Extract story_mappings for each story
+
+# Initialize task tracking lists
+verification_tasks = []   # List of (story_id, task_id) tuples
+review_tasks = []         # List of (story_id, task_id) tuples
+tdd_results = {}          # Dict of story_id → "passed" | "failed" (inline, no task_id)
 
 For each completed_story in batch:
     story_id = completed_story.id
@@ -1262,15 +1271,18 @@ For each completed_story in batch:
         - Comments like "# implement later" or "# stub"
 
         ## Output Format
-        After analysis, append ONE of these to progress.txt:
+        Write your result to the per-gate output file (NOT progress.txt):
 
         If ALL criteria met and NO skeleton code:
-          [VERIFIED] {story_id} - All acceptance criteria implemented
+          Write "[VERIFIED] {story_id} - All acceptance criteria implemented" to .agent-outputs/{story_id}.verify.result
 
         If issues found:
-          [VERIFY_FAILED] {story_id} - <brief reason>
+          Write "[VERIFY_FAILED] {story_id} - <brief reason>" to .agent-outputs/{story_id}.verify.result
 
         Then write a detailed verification report to .agent-outputs/{story_id}.verify.md
+
+        **IMPORTANT**: Write the single-line result marker to `.agent-outputs/{story_id}.verify.result`
+        (a separate file from the detailed report). Do NOT append to progress.txt.
         """
 
         verify_task = Task(
@@ -1279,6 +1291,7 @@ For each completed_story in batch:
             run_in_background=true,
             description="Verify {story_id}"
         )
+        verification_tasks.append((story_id, verify_task))
 
     # ── Gate 2: AI Code Review ──
     If run_review:
@@ -1317,18 +1330,21 @@ For each completed_story in batch:
         - info: Informational notes
 
         ## Output Format
-        After analysis, append ONE of these to progress.txt:
+        Write your result to the per-gate output file (NOT progress.txt):
 
         If score >= 70% AND no critical findings:
-          [REVIEW_PASSED] {story_id} - Score: X/100
+          Write "[REVIEW_PASSED] {story_id} - Score: X/100" to .agent-outputs/{story_id}.review.result
 
         If score < 70% OR has critical findings:
-          [REVIEW_ISSUES] {story_id} - Score: X/100 - <brief summary>
+          Write "[REVIEW_ISSUES] {story_id} - Score: X/100 - <brief summary>" to .agent-outputs/{story_id}.review.result
 
         Then write detailed report to .agent-outputs/{story_id}.review.md with:
         - Dimension scores and notes
         - All findings with severity, file, line
         - Suggestions for improvement
+
+        **IMPORTANT**: Write the single-line result marker to `.agent-outputs/{story_id}.review.result`
+        (a separate file from the detailed report). Do NOT append to progress.txt.
         """
 
         review_task = Task(
@@ -1337,22 +1353,22 @@ For each completed_story in batch:
             run_in_background=true,
             description="Review {story_id}"
         )
+        review_tasks.append((story_id, review_task))
 
-    # ── Gate 3: TDD Compliance (lightweight, no subagent needed) ──
+    # ── Gate 3: TDD Compliance (lightweight, inline — no subagent needed) ──
+    # TDD runs synchronously here — no task_id needed for wait step.
     If run_tdd:
-        # TDD check is lightweight — run inline, not as subagent
-        changed_files = Bash("git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --cached --name-only 2>/dev/null || echo ''")
         code_files = filter changed_files for code extensions, excluding test patterns
         test_files = filter changed_files for test patterns
 
         If code_files exist AND test_files empty:
-            echo "[TDD_FAILED] {story_id} - Code changes without tests" >> progress.txt
+            tdd_results[story_id] = "failed"
         Else:
-            echo "[TDD_PASSED] {story_id}" >> progress.txt
+            tdd_results[story_id] = "passed"
 
 # IMPORTANT: Launch verify_task and review_task in the SAME message
 # (multiple tool calls in one response) so they run in parallel.
-# TDD check runs inline since it's just a file-list comparison.
+# TDD check already completed inline above (just a file-list comparison).
 ```
 
 **CRITICAL**: The verify and review Task calls MUST be in a **single message with multiple tool calls** to ensure true parallel execution. Do NOT launch one, wait for it, then launch the next.
@@ -1369,9 +1385,12 @@ Task(prompt=REVIEW_PROMPT, subagent_type="general-purpose", run_in_background=tr
 
 ```
 # Wait for all background gate agents to complete
+# Build unified task list from the tracking lists populated in 9.2.6.2
 all_task_ids = []
-If run_verify: all_task_ids.extend(verify_task_ids)
-If run_review: all_task_ids.extend(review_task_ids)
+For story_id, task_id in verification_tasks:
+    all_task_ids.append(task_id)
+For story_id, task_id in review_tasks:
+    all_task_ids.append(task_id)
 
 For each task_id in all_task_ids:
     TaskOutput(task_id=task_id, block=true, timeout=180000)
@@ -1379,23 +1398,55 @@ For each task_id in all_task_ids:
 echo "All quality gates completed."
 ```
 
-**9.2.6.4: Collect and Display Unified Results**
+**9.2.6.4: Collect Results from Per-Gate Files and Merge to progress.txt**
+
+After all gates complete, read per-gate output files and merge results into `progress.txt` atomically.
+This avoids the concurrent-write race condition that would occur if subagents appended to progress.txt directly.
 
 ```
-# Read progress.txt ONCE to check all gate results
-progress_content = Read("progress.txt")
+# ── Collect verification results from per-gate files ──
+verified_count = 0
+verify_failed_count = 0
+For story_id, _ in verification_tasks:
+    result_file = ".agent-outputs/{story_id}.verify.result"
+    result_content = Read(result_file)
+    If "[VERIFIED]" in result_content:
+        verified_count += 1
+        echo result_content >> progress.txt
+    Elif "[VERIFY_FAILED]" in result_content:
+        verify_failed_count += 1
+        echo result_content >> progress.txt
+    Else:
+        # Malformed or missing result — treat as failure
+        verify_failed_count += 1
+        echo "[VERIFY_FAILED] {story_id} - No valid result marker in output" >> progress.txt
 
-# Verification results
-verified_count = count "[VERIFIED]" in progress_content
-verify_failed_count = count "[VERIFY_FAILED]" in progress_content
+# ── Collect review results from per-gate files ──
+review_passed_count = 0
+review_issues_count = 0
+For story_id, _ in review_tasks:
+    result_file = ".agent-outputs/{story_id}.review.result"
+    result_content = Read(result_file)
+    If "[REVIEW_PASSED]" in result_content:
+        review_passed_count += 1
+        echo result_content >> progress.txt
+    Elif "[REVIEW_ISSUES]" in result_content:
+        review_issues_count += 1
+        echo result_content >> progress.txt
+    Else:
+        review_issues_count += 1
+        echo "[REVIEW_ISSUES] {story_id} - No valid result marker in output" >> progress.txt
 
-# Review results
-review_passed_count = count "[REVIEW_PASSED]" in progress_content
-review_issues_count = count "[REVIEW_ISSUES]" in progress_content
-
-# TDD results
-tdd_passed_count = count "[TDD_PASSED]" in progress_content
-tdd_failed_count = count "[TDD_FAILED]" in progress_content
+# ── Collect TDD results (already computed inline in 9.2.6.2) ──
+tdd_passed_count = 0
+tdd_failed_count = 0
+For story_id, result in tdd_results:
+    If result == "passed":
+        tdd_passed_count += 1
+        echo "[TDD_PASSED] {story_id}" >> progress.txt
+    Else:
+        tdd_failed_count += 1
+        echo "[TDD_FAILED] {story_id} - Code changes without tests" >> progress.txt
 
 echo ""
 echo "============================================================"

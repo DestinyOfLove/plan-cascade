@@ -1014,11 +1014,10 @@ flowchart TD
         X --> Y[9.2: Verify Completion<br/>Read progress.txt]
         Y --> FMT[9.2.1: FORMAT Gate<br/>PRE_VALIDATION]
         FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - Parallel]
-        QGV --> Z{AI verify enabled?<br/>（default on; disable with --no-verify）}
-        Z -->|Yes| AA[9.2.6: AI Verification Gate<br/>Detect Skeleton Code]
-        Z -->|No| CR
-        AA --> CR[9.2.7: CODE_REVIEW Gate<br/>POST_VALIDATION]
-        CR --> AB{All Pass?}
+        QGV --> Z{AI gates enabled?<br/>（default on; disable with --no-verify/--no-review）}
+        Z -->|Yes| AA[9.2.6: Parallel Quality Gates<br/>Verify + Review + TDD]
+        Z -->|No| AB
+        AA --> AB{All Pass?}
         AB -->|No| AC[9.2.5: Retry with Different Agent<br/>+ Error Context]
         AC --> U
         AB -->|Yes| AD[9.3: Progress to Next Batch]

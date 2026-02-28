@@ -1014,11 +1014,10 @@ flowchart TD
         X --> Y[9.2: 验证完成<br/>读取 progress.txt]
         Y --> FMT[9.2.1: FORMAT 门控<br/>PRE_VALIDATION]
         FMT --> QGV[9.2.2: TYPECHECK + TEST + LINT<br/>VALIDATION - 并行]
-        QGV --> Z{AI 验证启用?<br/>（默认启用；--no-verify 禁用）}
-        Z -->|是| AA[9.2.6: AI 验证门<br/>检测骨架代码]
-        Z -->|否| CR
-        AA --> CR[9.2.7: CODE_REVIEW 门控<br/>POST_VALIDATION]
-        CR --> AB{全部通过?}
+        QGV --> Z{AI 门控启用?<br/>（默认启用；--no-verify/--no-review 禁用）}
+        Z -->|是| AA[9.2.6: 并行质量门控<br/>验证 + 审查 + TDD]
+        Z -->|否| AB
+        AA --> AB{全部通过?}
         AB -->|否| AC[9.2.5: 使用不同 Agent 重试<br/>+ 错误上下文]
         AC --> U
         AB -->|是| AD[9.3: 推进到下一批次]
