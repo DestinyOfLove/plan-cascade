@@ -50,7 +50,7 @@ def _parse_list(text: str) -> list[str]:
 
 def _ask_list(
     prompt: str,
-    console: "Console",
+    console: Console,
     default: list[str] | None = None,
     required: bool = False,
 ) -> list[str]:
@@ -64,11 +64,11 @@ def _ask_list(
         console.print("[red]At least 1 item is required.[/red]")
 
 
-def _ask_yes_no(prompt: str, console: "Console", default: bool = True) -> bool:
+def _ask_yes_no(prompt: str, console: Console, default: bool = True) -> bool:
     return Confirm.ask(prompt, default=default, console=console)
 
 
-def _ask_story_id(default: str, console: "Console", existing_ids: set[str]) -> str:
+def _ask_story_id(default: str, console: Console, existing_ids: set[str]) -> str:
     while True:
         story_id = Prompt.ask("Story id", default=default, console=console).strip()
         if not story_id:
@@ -81,7 +81,7 @@ def _ask_story_id(default: str, console: "Console", existing_ids: set[str]) -> s
 
 
 def _prompt_story(
-    console: "Console",
+    console: Console,
     story: SpecStory | None,
     index: int,
     flow_level: str,
@@ -228,7 +228,7 @@ def run_spec_interview(
     max_questions: int = 18,
     feature_slug: str | None = None,
     title_hint: str | None = None,
-    console: "Console",
+    console: Console,
 ) -> int:
     """
     Run interactive interview, writing spec.json/spec.md and interview state.
@@ -544,13 +544,13 @@ if HAS_TYPER:
     @spec_app.command("plan")
     def plan(
         description: str = typer.Argument(..., help="Specification description / intent"),
-        output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
+        output_dir: str | None = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
         flow: str = typer.Option("standard", "--flow", help="Flow level (quick|standard|full)"),
         mode: str = typer.Option("on", "--mode", help="Record mode (off|auto|on)"),
         first_principles: bool = typer.Option(False, "--first-principles", help="Ask first-principles questions first"),
         max_questions: int = typer.Option(18, "--max-questions", help="Soft cap for interview length (record only)"),
-        feature_slug: Optional[str] = typer.Option(None, "--feature-slug", help="Feature slug (mega feature name)"),
-        title: Optional[str] = typer.Option(None, "--title", help="Title hint"),
+        feature_slug: str | None = typer.Option(None, "--feature-slug", help="Feature slug (mega feature name)"),
+        title: str | None = typer.Option(None, "--title", help="Title hint"),
     ):
         """
         Start (or resume) a spec interview.
@@ -573,7 +573,7 @@ if HAS_TYPER:
 
     @spec_app.command("resume")
     def resume(
-        output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
+        output_dir: str | None = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
         flow: str = typer.Option("standard", "--flow", help="Flow level (quick|standard|full)"),
     ):
         """Resume an in-progress spec interview in the target directory."""
@@ -599,7 +599,7 @@ if HAS_TYPER:
 
     @spec_app.command("check")
     def check(
-        output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
+        output_dir: str | None = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
         flow: str = typer.Option("standard", "--flow", help="Flow level (quick|standard|full)"),
     ):
         """Run planning-time SpecQualityGate checks for spec.json."""
@@ -623,8 +623,8 @@ if HAS_TYPER:
 
     @spec_app.command("compile")
     def compile(
-        output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
-        prd_path: Optional[str] = typer.Option(None, "--prd-path", help="Output PRD path (default: <dir>/prd.json)"),
+        output_dir: str | None = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
+        prd_path: str | None = typer.Option(None, "--prd-path", help="Output PRD path (default: <dir>/prd.json)"),
         flow: str = typer.Option("standard", "--flow", help="Flow level (quick|standard|full)"),
         tdd: str = typer.Option("auto", "--tdd", help="TDD mode (off|on|auto)"),
         confirm: bool = typer.Option(False, "--confirm", help="Enable batch confirmation"),
@@ -660,7 +660,7 @@ if HAS_TYPER:
 
     @spec_app.command("cleanup")
     def cleanup(
-        output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
+        output_dir: str | None = typer.Option(None, "--output-dir", help="Output directory (default: cwd)"),
         all_files: bool = typer.Option(False, "--all", help="Also delete spec.json/spec.md"),
     ):
         """Cleanup interview state (and optionally spec artifacts)."""

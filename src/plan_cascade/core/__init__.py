@@ -19,6 +19,27 @@ Contains the core orchestration logic including:
 """
 
 from .changed_files import ChangedFilesDetector
+from .dashboard import (
+    ActionType,
+    BatchStatus,
+    DashboardAggregator,
+    DashboardFormatter,
+    DashboardState,
+    ExecutionStatus,
+    FailureInfo,
+    GateSummary,
+    RecommendedAction,
+    StoryInfo,
+    format_dashboard,
+    get_dashboard,
+    read_progress_status,
+    show_dashboard,
+)
+from .dashboard import (
+    StoryStatus as DashboardStoryStatus,
+)
+from .design_doc_converter import DesignDocConverter
+from .design_doc_generator import DesignDocGenerator
 from .done_gate import (
     ChangeSummaryEntry,
     DoDCheckResult,
@@ -35,8 +56,6 @@ from .done_gate import (
     check_test_changes,
     generate_wrapup_summary,
 )
-from .design_doc_converter import DesignDocConverter
-from .design_doc_generator import DesignDocGenerator
 from .error_parser import (
     ErrorInfo,
     ErrorSeverity,
@@ -96,31 +115,14 @@ from .retry_manager import (
 from .skill_cache import SkillCache, SkillCacheEntry
 from .stage_state import (
     ExecutionStage,
-    StageStatus,
-    StageState,
-    StageInput,
-    StageOutput,
     StageContract,
     StageContractRegistry,
+    StageInput,
+    StageOutput,
+    StageState,
     StageStateMachine,
+    StageStatus,
     get_contract_registry,
-)
-from .dashboard import (
-    ExecutionStatus,
-    StoryStatus as DashboardStoryStatus,
-    ActionType,
-    StoryInfo,
-    BatchStatus,
-    GateSummary,
-    FailureInfo,
-    RecommendedAction,
-    DashboardState,
-    DashboardAggregator,
-    DashboardFormatter,
-    read_progress_status,
-    get_dashboard,
-    format_dashboard,
-    show_dashboard,
 )
 from .strategy import ExecutionStrategy, StrategyDecision
 from .user_skill_config import UserSkillConfig, UserSkillEntry

@@ -12,7 +12,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..state.context_filter import ContextFilter
 from ..state.state_manager import StateManager
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from ..backends.agent_executor import AgentExecutor
     from ..backends.phase_config import AgentOverrides, ExecutionPhase
     from ..state.path_resolver import PathResolver
-    from .stage_state import StageStateMachine, ExecutionStage
+    from .stage_state import ExecutionStage, StageStateMachine
 
 
 class StoryAgent:

@@ -7,6 +7,7 @@ superseded decisions, and for collecting/applying actions.
 """
 
 import json
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -713,7 +714,7 @@ class TestCollectModeCLI:
 
         script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
         result = subprocess.run(
-            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            [sys.executable, str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),
@@ -741,7 +742,7 @@ class TestCollectModeCLI:
         script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
         result = subprocess.run(
             [
-                "uv", "run", "python", str(script),
+                sys.executable, str(script),
                 "--mode", "collect",
                 "--new-decisions", str(new_path),
                 "--project-root", str(temp_project_dir),
@@ -763,7 +764,7 @@ class TestCollectModeCLI:
 
         script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
         result = subprocess.run(
-            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            [sys.executable, str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),
@@ -781,7 +782,7 @@ class TestCollectModeCLI:
         # Success case (empty project is still success)
         script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
         result = subprocess.run(
-            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            [sys.executable, str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),
@@ -800,7 +801,7 @@ class TestCollectModeCLI:
 
         script = Path(__file__).parent.parent / "skills" / "hybrid-ralph" / "scripts" / "memory-doctor.py"
         result = subprocess.run(
-            ["uv", "run", "python", str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
+            [sys.executable, str(script), "--mode", "collect", "--project-root", str(temp_project_dir)],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),

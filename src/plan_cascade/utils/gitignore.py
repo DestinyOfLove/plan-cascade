@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 # Plan Cascade files that should be ignored in user projects
 PLAN_CASCADE_GITIGNORE_ENTRIES = [
@@ -74,7 +73,7 @@ class GitignoreCheckResult:
 
     gitignore_exists: bool
     has_plan_cascade_section: bool
-    missing_entries: List[str]
+    missing_entries: list[str]
     needs_update: bool
     gitignore_path: Path
 
@@ -95,7 +94,7 @@ class GitignoreUpdateResult:
 
     success: bool
     action: str  # "created", "updated", "skipped"
-    entries_added: List[str]
+    entries_added: list[str]
     message: str
 
     def to_dict(self) -> dict:
@@ -265,7 +264,7 @@ class GitignoreManager:
 
         if not silent and update_result.success:
             if update_result.action == "created":
-                print(f"Created .gitignore with Plan Cascade entries")
+                print("Created .gitignore with Plan Cascade entries")
             elif update_result.action == "updated":
                 print(f"Updated .gitignore with Plan Cascade entries ({len(update_result.entries_added)} added)")
 

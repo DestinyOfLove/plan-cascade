@@ -28,9 +28,9 @@ from typing import TYPE_CHECKING, Any, Optional
 from ..state.state_manager import StateManager
 
 if TYPE_CHECKING:
+    from ..state.path_resolver import PathResolver
     from .cross_platform_detector import CrossPlatformDetector
     from .phase_config import AgentOverrides, ExecutionPhase, PhaseAgentManager
-    from ..state.path_resolver import PathResolver
 
 
 class AgentExecutor:
@@ -441,8 +441,8 @@ Work methodically and document your progress.
         try:
             from ..core.tdd_support import (
                 TDDConfig,
-                should_enable_tdd,
                 get_tdd_prompt_template,
+                should_enable_tdd,
             )
 
             config = TDDConfig.from_dict(tdd_config)

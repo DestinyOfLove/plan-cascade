@@ -19,7 +19,6 @@ import sys
 import time
 from pathlib import Path
 
-
 # Constants
 LINK_FILE_NAME = ".plan-cascade-link.json"
 

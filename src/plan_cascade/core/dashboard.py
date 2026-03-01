@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..state.path_resolver import PathResolver
@@ -65,7 +65,7 @@ class StoryInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StoryInfo":
+    def from_dict(cls, data: dict[str, Any]) -> StoryInfo:
         return cls(
             story_id=data["story_id"],
             title=data["title"],
@@ -95,7 +95,7 @@ class BatchStatus:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BatchStatus":
+    def from_dict(cls, data: dict[str, Any]) -> BatchStatus:
         return cls(
             batch_id=data["batch_id"],
             stories=[StoryInfo.from_dict(s) for s in data["stories"]],
@@ -125,7 +125,7 @@ class GateSummary:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "GateSummary":
+    def from_dict(cls, data: dict[str, Any]) -> GateSummary:
         return cls(
             passed=data.get("passed", 0),
             failed=data.get("failed", 0),
@@ -156,7 +156,7 @@ class FailureInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FailureInfo":
+    def from_dict(cls, data: dict[str, Any]) -> FailureInfo:
         return cls(
             story_id=data["story_id"],
             error=data["error"],
@@ -185,7 +185,7 @@ class RecommendedAction:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RecommendedAction":
+    def from_dict(cls, data: dict[str, Any]) -> RecommendedAction:
         return cls(
             action_type=ActionType(data["action_type"]),
             description=data["description"],
@@ -253,7 +253,7 @@ class DashboardState:
 
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DashboardState":
+    def from_dict(cls, data: dict[str, Any]) -> DashboardState:
         return cls(
             status=ExecutionStatus(data.get("status", "not_started")),
             strategy=data.get("strategy"),
@@ -533,7 +533,7 @@ class DashboardAggregator:
     def __init__(
         self,
         project_root: Path,
-        path_resolver: "PathResolver | None" = None,
+        path_resolver: PathResolver | None = None,
         legacy_mode: bool = True,
     ) -> None:
         """
@@ -1185,7 +1185,7 @@ class DashboardFormatter:
 
 def get_dashboard(
     project_root: Path | str,
-    path_resolver: "PathResolver | None" = None,
+    path_resolver: PathResolver | None = None,
     legacy_mode: bool = True,
 ) -> DashboardState:
     """

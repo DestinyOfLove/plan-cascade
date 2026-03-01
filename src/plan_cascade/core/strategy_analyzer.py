@@ -216,7 +216,7 @@ Return ONLY the JSON object, no additional text."""
         context: str = "",
         project_path: Path | None = None,
         on_text: OnTextCallback | None = None,
-        flow_override: Optional[ExecutionFlow] = None
+        flow_override: ExecutionFlow | None = None
     ) -> StrategyDecision:
         """
         Analyze a task description and determine the best strategy and flow.

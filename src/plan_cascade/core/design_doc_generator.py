@@ -643,7 +643,7 @@ class DesignDocGenerator:
             """Validate a field value against expected type(s)."""
             if isinstance(expected_type, tuple):
                 if not isinstance(value, expected_type):
-                    type_names = " or ".join(t.__name__ if t != type(None) else "null"
+                    type_names = " or ".join(t.__name__ if t is not type(None) else "null"
                                             for t in expected_type)
                     return [f"{path}: expected {type_names}, got {type(value).__name__}"]
             else:

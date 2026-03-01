@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field, asdict
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..state.path_resolver import PathResolver
@@ -47,7 +48,7 @@ class ExecutionStage(str, Enum):
     WRAP_UP = "wrap_up"
 
     @classmethod
-    def get_order(cls) -> list["ExecutionStage"]:
+    def get_order(cls) -> list[ExecutionStage]:
         """Get stages in execution order."""
         return [
             cls.INTAKE,
@@ -61,11 +62,11 @@ class ExecutionStage(str, Enum):
         ]
 
     @classmethod
-    def get_index(cls, stage: "ExecutionStage") -> int:
+    def get_index(cls, stage: ExecutionStage) -> int:
         """Get the index of a stage in execution order."""
         return cls.get_order().index(stage)
 
-    def next_stage(self) -> "ExecutionStage | None":
+    def next_stage(self) -> ExecutionStage | None:
         """Get the next stage in sequence, or None if at end."""
         order = ExecutionStage.get_order()
         idx = order.index(self)
@@ -73,7 +74,7 @@ class ExecutionStage(str, Enum):
             return order[idx + 1]
         return None
 
-    def previous_stage(self) -> "ExecutionStage | None":
+    def previous_stage(self) -> ExecutionStage | None:
         """Get the previous stage in sequence, or None if at start."""
         order = ExecutionStage.get_order()
         idx = order.index(self)
@@ -131,7 +132,7 @@ class StageState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StageState":
+    def from_dict(cls, data: dict[str, Any]) -> StageState:
         """Create from dictionary (JSON deserialization)."""
         return cls(
             stage=ExecutionStage(data["stage"]),
@@ -191,7 +192,7 @@ class StageInput:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StageInput":
+    def from_dict(cls, data: dict[str, Any]) -> StageInput:
         """Create from dictionary (JSON deserialization)."""
         source = data.get("source_stage")
         return cls(
@@ -225,7 +226,7 @@ class StageOutput:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StageOutput":
+    def from_dict(cls, data: dict[str, Any]) -> StageOutput:
         """Create from dictionary (JSON deserialization)."""
         return cls(
             name=data["name"],
@@ -962,7 +963,7 @@ class StageStateMachine:
         cls,
         data: dict[str, Any],
         contract_registry: StageContractRegistry | None = None,
-    ) -> "StageStateMachine":
+    ) -> StageStateMachine:
         """
         Create state machine from dictionary.
 
@@ -994,7 +995,7 @@ class StageStateMachine:
 
         return machine
 
-    def save_state(self, path_resolver: "PathResolver") -> Path:
+    def save_state(self, path_resolver: PathResolver) -> Path:
         """
         Save state to file.
 
@@ -1023,9 +1024,9 @@ class StageStateMachine:
     @classmethod
     def load_state(
         cls,
-        path_resolver: "PathResolver",
+        path_resolver: PathResolver,
         contract_registry: StageContractRegistry | None = None,
-    ) -> "StageStateMachine | None":
+    ) -> StageStateMachine | None:
         """
         Load state from file.
 

@@ -791,7 +791,7 @@ if HAS_TYPER:
 
             # Display header
             console.print()
-            console.print(f"[bold blue]Plan Cascade Dependency Analysis[/bold blue]")
+            console.print("[bold blue]Plan Cascade Dependency Analysis[/bold blue]")
             console.print(f"[dim]Project: {project}[/dim]")
             console.print(f"[dim]Source: {result.source_type}.json[/dim]")
             console.print()

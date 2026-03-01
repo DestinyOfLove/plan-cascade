@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-
 SPEC_SCHEMA_VERSION = "spec-0.1"
 SPEC_INTERVIEW_SCHEMA_VERSION = "spec-interview-0.1"
 
@@ -78,7 +77,7 @@ class SpecStory:
         return d
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SpecStory":
+    def from_dict(cls, data: dict[str, Any]) -> SpecStory:
         verification = _as_dict(data.get("verification"))
         commands = _as_list(verification.get("commands"))
         manual_steps = _as_list(verification.get("manual_steps"))
@@ -148,7 +147,7 @@ class Spec:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Spec":
+    def from_dict(cls, data: dict[str, Any]) -> Spec:
         stories_raw = data.get("stories", [])
         stories: list[SpecStory] = []
         if isinstance(stories_raw, list):
@@ -209,7 +208,7 @@ class SpecInterviewState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SpecInterviewState":
+    def from_dict(cls, data: dict[str, Any]) -> SpecInterviewState:
         history_raw = data.get("history", [])
         history: list[dict[str, str]] = []
         if isinstance(history_raw, list):

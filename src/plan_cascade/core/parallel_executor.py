@@ -810,7 +810,7 @@ class ParallelExecutor:
                     else:
                         summary = "; ".join(result.errors[:2]) if result.errors else "Check failed"
                         f.write(f"[{timestamp}] [DoD_FAILED] {story_id}: {summary}\n")
-            except IOError:
+            except OSError:
                 pass  # Non-critical
 
             return result.passed

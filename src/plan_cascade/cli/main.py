@@ -42,7 +42,7 @@ try:
 except ImportError:
     HAS_TYPER = False
 
-from .. import __version__, _SETTINGS_AVAILABLE
+from .. import _SETTINGS_AVAILABLE, __version__
 from .context import CLIContext
 from .output import OutputManager
 
@@ -164,7 +164,7 @@ if HAS_TYPER:
                 if tool_name == "tool_result":
                     is_error = data.get("is_error", False)
                     if is_error:
-                        output.print_error(f"    Tool error")
+                        output.print_error("    Tool error")
                 else:
                     output.print(f"  [dim]> Tool: {tool_name}[/dim]")
 
@@ -438,7 +438,7 @@ if HAS_TYPER:
                         marker = "[green]*[/green]" if agent == current else " "
                         output.print(f"  {marker} {agent}")
                     new_value = Prompt.ask(
-                        f"Select agent",
+                        "Select agent",
                         choices=available_agents,
                         default=current if current in available_agents else "claude-code",
                     )
@@ -1333,7 +1333,7 @@ if HAS_TYPER:
             config=retry_config,
         )
 
-        output.print_info(f"Retry: max 3 attempts with exponential backoff")
+        output.print_info("Retry: max 3 attempts with exponential backoff")
 
         # Show parallel execution info
         if parallel:
@@ -1409,6 +1409,7 @@ if HAS_TYPER:
     ):
         """Execute auto-run with parallel story execution within batches."""
         from datetime import datetime
+
         from rich.panel import Panel
 
         from ..core.iteration_loop import IterationMode, IterationState, IterationStatus
@@ -1576,6 +1577,7 @@ if HAS_TYPER:
     def _show_parallel_results(state, batch_results: list, total_duration: float, output):
         """Display final parallel execution results."""
         from rich.panel import Panel
+
         from ..core.iteration_loop import IterationStatus
 
         status_color = {
@@ -1590,7 +1592,7 @@ if HAS_TYPER:
             f"[bold]Status:[/bold] [{status_color}]{state.status.value}[/{status_color}]",
             f"[bold]Progress:[/bold] {state.progress_percent:.1f}%",
             "",
-            f"[bold]Stories:[/bold]",
+            "[bold]Stories:[/bold]",
             f"  Completed: [green]{state.completed_stories}[/green]",
             f"  Failed: [red]{state.failed_stories}[/red]",
             f"  Total: {state.total_stories}",
@@ -1726,7 +1728,7 @@ if HAS_TYPER:
 
         # Summary
         total_stories = sum(len(b) for b in batches)
-        output.print(f"[bold]Summary:[/bold]")
+        output.print("[bold]Summary:[/bold]")
         output.print(f"  Total Batches: {len(batches)}")
         output.print(f"  Total Stories: {total_stories}")
 
@@ -1797,7 +1799,7 @@ if HAS_TYPER:
             f"[bold]Status:[/bold] [{status_color}]{state.status.value}[/{status_color}]",
             f"[bold]Progress:[/bold] {state.progress_percent:.1f}%",
             "",
-            f"[bold]Stories:[/bold]",
+            "[bold]Stories:[/bold]",
             f"  Completed: [green]{state.completed_stories}[/green]",
             f"  Failed: [red]{state.failed_stories}[/red]",
             f"  Total: {state.total_stories}",
@@ -2216,9 +2218,9 @@ Phase 1
         output.print_success(f"Task: {description}")
         output.print()
         output.print("[bold]Created Files:[/bold]")
-        output.print(f"  [green]v[/green] task_plan.md - Phase tracking and decisions")
-        output.print(f"  [green]v[/green] findings.md  - Research and discoveries")
-        output.print(f"  [green]v[/green] progress.md  - Session log and test results")
+        output.print("  [green]v[/green] task_plan.md - Phase tracking and decisions")
+        output.print("  [green]v[/green] findings.md  - Research and discoveries")
+        output.print("  [green]v[/green] progress.md  - Session log and test results")
         output.print()
         output.print("[bold]Next Steps:[/bold]")
         output.print("  1. Read task_plan.md to understand the phases")
@@ -2968,8 +2970,8 @@ Phase 1
             output.print_info("All features complete. Running completion...")
             # Import and run mega complete logic
             try:
-                from ..state.mega_state import MegaStateManager
                 from ..core.mega_generator import MegaPlanGenerator
+                from ..state.mega_state import MegaStateManager
 
                 generator = MegaPlanGenerator(project, path_resolver=path_resolver)
                 state_manager = MegaStateManager(project, path_resolver=path_resolver)
@@ -2993,8 +2995,8 @@ Phase 1
             # Run the mega resume command programmatically
             try:
                 from ..core.feature_orchestrator import FeatureOrchestrator
-                from ..state.mega_state import MegaStateManager
                 from ..core.mega_generator import MegaPlanGenerator
+                from ..state.mega_state import MegaStateManager
 
                 state_manager = MegaStateManager(project, path_resolver=path_resolver)
                 generator = MegaPlanGenerator(project, path_resolver=path_resolver)
@@ -3144,6 +3146,7 @@ Phase 1
         """
         import json
         import shutil
+
         from .context import get_cli_context
 
         project = Path(project_path) if project_path else Path.cwd()
@@ -3371,7 +3374,7 @@ Phase 1
             console.print(f"    [dim]Dependencies:[/dim] {deps_str}")
 
             if acceptance_criteria:
-                console.print(f"    [dim]Acceptance Criteria:[/dim]")
+                console.print("    [dim]Acceptance Criteria:[/dim]")
                 for ac in acceptance_criteria[:3]:  # Show first 3
                     console.print(f"      - {ac}")
                 if len(acceptance_criteria) > 3:
@@ -3565,8 +3568,8 @@ Phase 1
             from ..core.dashboard import (
                 DashboardAggregator,
                 DashboardFormatter,
-                get_dashboard,
                 format_dashboard,
+                get_dashboard,
             )
         except ImportError as e:
             output.print_error(f"Dashboard module not available: {e}")

@@ -118,6 +118,24 @@ def sample_mega_plan():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _disable_rich_colors():
+    """
+    Disable Rich/Typer color output in CLI tests.
+
+    Typer uses Rich for help formatting, which adds ANSI escape codes
+    that break simple string assertions (e.g., "--option" gets split
+    across escape sequences). Setting NO_COLOR=1 disables all ANSI
+    formatting, making help text assertions reliable across environments.
+    """
+    mp = pytest.MonkeyPatch()
+    mp.setenv("NO_COLOR", "1")
+    try:
+        yield
+    finally:
+        mp.undo()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _disable_git_gpg_signing():
     """
     Disable git commit signing for the test session.

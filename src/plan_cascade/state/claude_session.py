@@ -136,7 +136,7 @@ def get_latest_session_file(project_dir: Path) -> Path | None:
 def _session_file_mentions_cwd(session_file: Path, target_cwd_norm: str) -> bool:
     """Cheap check: scan first N lines of a session file for matching cwd."""
     try:
-        with open(session_file, "r", encoding="utf-8") as f:
+        with open(session_file, encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i > 80:
                     break
@@ -196,7 +196,7 @@ class SessionCursor:
     offset: int = 0
 
     @classmethod
-    def load(cls, path: Path) -> "SessionCursor":
+    def load(cls, path: Path) -> SessionCursor:
         if not path.exists():
             return cls()
         try:

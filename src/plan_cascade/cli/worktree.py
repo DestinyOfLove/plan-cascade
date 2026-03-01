@@ -34,8 +34,8 @@ except ImportError:
     HAS_TYPER = False
 
 if TYPE_CHECKING:
-    from .output import OutputManager
     from ..state.path_resolver import PathResolver
+    from .output import OutputManager
 
 
 class WorktreeStatus(str, Enum):
@@ -824,9 +824,9 @@ if HAS_TYPER:
             spec_mode = spec
             should_run_spec = spec_mode == "on" or (spec_mode == "auto" and flow == "full")
             if should_run_spec:
-                from .spec import run_spec_interview
                 from ..core.spec_compiler import CompileOptions, compile_spec_to_prd
                 from ..core.spec_io import get_spec_paths, load_spec
+                from .spec import run_spec_interview
 
                 output.print()
                 output.print_info("Running spec interview...")
@@ -876,7 +876,7 @@ if HAS_TYPER:
                 output.print("  - .state/spec-interview.json")
 
             output.print()
-            output.print(f"[bold]Next steps:[/bold]")
+            output.print("[bold]Next steps:[/bold]")
             output.print(f"  cd {state.worktree_path}")
             output.print("  # Review/edit prd.json (and spec.json/spec.md if used)")
             output.print("  # Or run: plan-cascade run '<task description>'")

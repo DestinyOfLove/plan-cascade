@@ -122,8 +122,8 @@ class MigrationManager:
         self._data_dir_override = Path(data_dir_override) if data_dir_override else None
 
         # Lazy import to avoid circular dependencies
-        from ..state.path_resolver import PathResolver
         from ..state.config_manager import ConfigManager
+        from ..state.path_resolver import PathResolver
         from ..state.project_link import ProjectLinkManager
 
         self._path_resolver = PathResolver(

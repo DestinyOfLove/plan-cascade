@@ -43,14 +43,14 @@ if HAS_TYPER:
 
     # ========== Helper Functions ==========
 
-    def _get_project_path(project_path: Optional[str]) -> Path:
+    def _get_project_path(project_path: str | None) -> Path:
         """Get the project path from argument or cwd."""
         return Path(project_path) if project_path else Path.cwd()
 
     def _get_path_resolver_for_project(
         cli_ctx,
         project: Path,
-        project_path: Optional[str],
+        project_path: str | None,
     ):
         """
         Resolve a PathResolver for the target project.
@@ -243,14 +243,14 @@ if HAS_TYPER:
     def plan(
         ctx: typer.Context,
         description: str = typer.Argument(..., help="Project description for mega-plan generation"),
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         target_branch: str = typer.Option("main", "--target", "-t", help="Target branch for merging"),
         execution_mode: str = typer.Option("auto", "--mode", "-m", help="Execution mode (auto/manual)"),
-        prd_agent: Optional[str] = typer.Option(None, "--prd-agent", help="Agent for PRD generation"),
-        story_agent: Optional[str] = typer.Option(None, "--story-agent", help="Agent for story execution"),
-        design_doc: Optional[str] = typer.Option(None, "--design-doc", "-d", help="Path to design document"),
+        prd_agent: str | None = typer.Option(None, "--prd-agent", help="Agent for PRD generation"),
+        story_agent: str | None = typer.Option(None, "--story-agent", help="Agent for story execution"),
+        design_doc: str | None = typer.Option(None, "--design-doc", "-d", help="Path to design document"),
         no_llm: bool = typer.Option(False, "--no-llm", help="Skip LLM analysis and use manual feature entry"),
-        llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="LLM provider (claude, openai, etc.)"),
+        llm_provider: str | None = typer.Option(None, "--llm-provider", help="LLM provider (claude, openai, etc.)"),
     ):
         """
         Generate a mega-plan from a project description.
@@ -393,9 +393,9 @@ if HAS_TYPER:
     @mega_app.command("approve")
     def approve(
         ctx: typer.Context,
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         auto_prd: bool = typer.Option(False, "--auto-prd", help="Auto-approve generated PRDs"),
-        batch: Optional[int] = typer.Option(None, "--batch", "-b", help="Execute specific batch only"),
+        batch: int | None = typer.Option(None, "--batch", "-b", help="Execute specific batch only"),
         flow: str = typer.Option(
             "standard",
             "--flow",
@@ -538,9 +538,9 @@ if HAS_TYPER:
             spec_mode = spec
             should_run_spec = spec_mode == "on" or (spec_mode == "auto" and flow == "full")
             if should_run_spec:
-                from .spec import run_spec_interview
                 from ..core.spec_compiler import CompileOptions, compile_spec_to_prd
                 from ..core.spec_io import get_spec_paths, load_spec
+                from .spec import run_spec_interview
 
                 _print_info("Running spec interviews (one feature at a time)...")
                 for feature in target_batch:
@@ -609,7 +609,7 @@ if HAS_TYPER:
     @mega_app.command("status")
     def status(
         ctx: typer.Context,
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed status"),
     ):
         """
@@ -700,7 +700,7 @@ if HAS_TYPER:
     @mega_app.command("complete")
     def complete(
         ctx: typer.Context,
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         force: bool = typer.Option(False, "--force", "-f", help="Force completion even if features incomplete"),
         cleanup: bool = typer.Option(True, "--cleanup/--no-cleanup", help="Clean up planning files after completion"),
     ):
@@ -789,7 +789,7 @@ if HAS_TYPER:
     @mega_app.command("edit")
     def edit(
         ctx: typer.Context,
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
     ):
         """
         Interactively edit the mega-plan.
@@ -969,7 +969,7 @@ if HAS_TYPER:
     @mega_app.command("resume")
     def resume(
         ctx: typer.Context,
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         auto_prd: bool = typer.Option(False, "--auto-prd", help="Auto-approve PRDs for pending features"),
     ):
         """

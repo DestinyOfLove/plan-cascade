@@ -37,7 +37,7 @@ if HAS_TYPER:
 
     # ========== Helper Functions ==========
 
-    def _get_project_path(project_path: Optional[str]) -> Path:
+    def _get_project_path(project_path: str | None) -> Path:
         """Get the project path from argument or cwd."""
         return Path(project_path) if project_path else Path.cwd()
 
@@ -273,9 +273,9 @@ if HAS_TYPER:
 
     @design_app.command("generate")
     def generate(
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
-        level: Optional[str] = typer.Option(None, "--level", "-l", help="Force level (project/feature)"),
-        feature_id: Optional[str] = typer.Option(None, "--feature-id", "-f", help="Feature ID for feature-level docs"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
+        level: str | None = typer.Option(None, "--level", "-l", help="Force level (project/feature)"),
+        feature_id: str | None = typer.Option(None, "--feature-id", "-f", help="Feature ID for feature-level docs"),
         source: str = typer.Option("ai-generated", "--source", "-s", help="Source type"),
         force: bool = typer.Option(False, "--force", help="Overwrite existing design document"),
     ):
@@ -356,7 +356,7 @@ if HAS_TYPER:
 
     @design_app.command("show")
     def show(
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed information"),
         json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
         skip_validation: bool = typer.Option(False, "--no-validate", help="Skip validation check"),
@@ -412,7 +412,7 @@ if HAS_TYPER:
 
     @design_app.command("review")
     def review(
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
     ):
         """
         Interactively review and edit the design document.
@@ -856,8 +856,8 @@ if HAS_TYPER:
     @design_app.command("import")
     def import_doc(
         input_file: str = typer.Argument(..., help="Path to the input document"),
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
-        format_type: Optional[str] = typer.Option(None, "--format", "-f", help="Force format (markdown/json/html)"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
+        format_type: str | None = typer.Option(None, "--format", "-f", help="Force format (markdown/json/html)"),
         force: bool = typer.Option(False, "--force", help="Overwrite existing design document"),
     ):
         """
@@ -950,10 +950,10 @@ if HAS_TYPER:
 
     @design_app.command("validate")
     def validate(
-        project_path: Optional[str] = typer.Option(None, "--project", "-p", help="Project path"),
+        project_path: str | None = typer.Option(None, "--project", "-p", help="Project path"),
         json_output: bool = typer.Option(False, "--json", "-j", help="Output validation results as JSON"),
         quiet: bool = typer.Option(False, "--quiet", "-q", help="Only output errors, no summary"),
-        file_path: Optional[str] = typer.Option(None, "--file", "-f", help="Validate a specific JSON file instead of design_doc.json"),
+        file_path: str | None = typer.Option(None, "--file", "-f", help="Validate a specific JSON file instead of design_doc.json"),
     ):
         """
         Validate a design document against the expected schema.

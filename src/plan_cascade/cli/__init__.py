@@ -19,9 +19,9 @@ from .main import app, main
 try:
     from .worktree import WorktreeManager, WorktreeState, WorktreeStatus, worktree_app
 except ImportError:
-    WorktreeManager = None
-    WorktreeState = None
-    WorktreeStatus = None
+    WorktreeManager = None  # type: ignore[assignment,misc]
+    WorktreeState = None  # type: ignore[assignment,misc]
+    WorktreeStatus = None  # type: ignore[assignment,misc]
     worktree_app = None
 
 try:
@@ -37,8 +37,8 @@ except ImportError:
 try:
     from .migrate import MigrationManager, MigrationResult, migrate_app
 except ImportError:
-    MigrationManager = None
-    MigrationResult = None
+    MigrationManager = None  # type: ignore[assignment,misc]
+    MigrationResult = None  # type: ignore[assignment,misc]
     migrate_app = None
 
 __all__ = [
