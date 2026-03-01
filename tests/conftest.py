@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures for Plan Cascade tests."""
 
-import os
+import os  # noqa: I001 — must run before any Rich/Typer imports below
+
 # Disable Rich/Typer ANSI color output BEFORE any imports that trigger Rich.
 # Rich caches terminal capability detection at import time, so setting NO_COLOR
 # via a pytest fixture (even session-scoped) is too late on CI where Rich detects
@@ -8,10 +9,11 @@ import os
 os.environ["NO_COLOR"] = "1"
 os.environ.setdefault("TERM", "dumb")
 
-import json
-import pytest
-import tempfile
-from pathlib import Path
+import json  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
 
 
 @pytest.fixture

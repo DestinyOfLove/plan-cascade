@@ -242,14 +242,23 @@ class TestEnsureCorrectEnv:
 class TestCLIMainFallback:
     """Verify main() shows error when _ensure_correct_env can't fix things."""
 
+    @pytest.fixture(autouse=True)
+    def _cli_main_module(self):
+        """Get the actual cli.main module (not the main function shadowing it)."""
+        # plan_cascade.cli.__init__ does `from .main import main`, which shadows
+        # the submodule name. Use sys.modules to get the real module object.
+        import importlib
+        importlib.import_module("plan_cascade.cli.main")
+        self._mod = sys.modules["plan_cascade.cli.main"]
+
     def test_main_exits_when_settings_unavailable_and_reexec_done(self, capsys):
         """After re-exec (env var set), main() should show error if deps still missing."""
-        from plan_cascade.cli.main import main
+        mod = self._mod
 
-        with patch("plan_cascade.cli.main._SETTINGS_AVAILABLE", False), \
-             patch("plan_cascade.cli.main._ensure_correct_env"), \
+        with patch.object(mod, "_SETTINGS_AVAILABLE", False), \
+             patch.object(mod, "_ensure_correct_env"), \
              pytest.raises(SystemExit) as exc_info:
-            main()
+            mod.main()
 
         assert exc_info.value.code == 1
 
@@ -259,13 +268,13 @@ class TestCLIMainFallback:
 
     def test_main_cleans_up_reexec_env_var(self):
         """main() should remove _PLAN_CASCADE_REEXEC from environment."""
-        from plan_cascade.cli.main import main
+        mod = self._mod
 
-        with patch("plan_cascade.cli.main._ensure_correct_env"), \
-             patch("plan_cascade.cli.main._SETTINGS_AVAILABLE", True), \
-             patch("plan_cascade.cli.main.HAS_TYPER", True), \
-             patch("plan_cascade.cli.main.app") as mock_app, \
+        with patch.object(mod, "_ensure_correct_env"), \
+             patch.object(mod, "_SETTINGS_AVAILABLE", True), \
+             patch.object(mod, "HAS_TYPER", True), \
+             patch.object(mod, "app") as mock_app, \
              patch.dict(os.environ, {"_PLAN_CASCADE_REEXEC": "1"}):
-            main()
+            mod.main()
 
         assert "_PLAN_CASCADE_REEXEC" not in os.environ
