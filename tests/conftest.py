@@ -1,5 +1,13 @@
 """Pytest configuration and fixtures for Plan Cascade tests."""
 
+import os
+# Disable Rich/Typer ANSI color output BEFORE any imports that trigger Rich.
+# Rich caches terminal capability detection at import time, so setting NO_COLOR
+# via a pytest fixture (even session-scoped) is too late on CI where Rich detects
+# a capable terminal. Setting it here ensures it takes effect before Rich loads.
+os.environ["NO_COLOR"] = "1"
+os.environ.setdefault("TERM", "dumb")
+
 import json
 import pytest
 import tempfile
@@ -115,24 +123,6 @@ def sample_mega_plan():
             }
         ]
     }
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _disable_rich_colors():
-    """
-    Disable Rich/Typer color output in CLI tests.
-
-    Typer uses Rich for help formatting, which adds ANSI escape codes
-    that break simple string assertions (e.g., "--option" gets split
-    across escape sequences). Setting NO_COLOR=1 disables all ANSI
-    formatting, making help text assertions reliable across environments.
-    """
-    mp = pytest.MonkeyPatch()
-    mp.setenv("NO_COLOR", "1")
-    try:
-        yield
-    finally:
-        mp.undo()
 
 
 @pytest.fixture(scope="session", autouse=True)
